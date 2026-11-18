@@ -11,6 +11,8 @@
 #include "keyboard_input.h"
 #include "sample_log.h"
 
+#include <cctype>
+
 #undef SLOGI
 #define SLOGI(...) do { } while (0)
 
@@ -83,6 +85,11 @@ void UILaunchPage::handle_home_key(lv_event_t *event)
            kbd_state_name(elm->key_state),
            elm->sym_name);
 
+    if (list_mode_ && list_container_) {
+        handle_list_key(elm, code);
+        return;
+    }
+
     if (elm->key_state)
     {
         switch (code)
@@ -122,6 +129,37 @@ void UILaunchPage::handle_home_key(lv_event_t *event)
         audio_play_enter();
         launch_selected_app();
     }
+}
+
+void UILaunchPage::handle_list_key(const struct key_item *elm, uint32_t code)
+{
+    if (!elm->key_state) {
+        if (code == KEY_ENTER) {
+            audio_play_enter();
+            launch_selected_app();
+        }
+        return;
+    }
+
+    bool changed = false;
+    switch (code) {
+    case KEY_UP:    changed = list_move(-1, true); break;
+    case KEY_DOWN:  changed = list_move(1, true); break;
+    case KEY_LEFT:  changed = list_move(-static_cast<int>(kListRows), false); break;
+    case KEY_RIGHT: changed = list_move(static_cast<int>(kListRows), false); break;
+    default: {
+        // F/X/Z/C are arrows; fn/ctrl/alt/logo combinations are shortcuts, not text.
+        const uint32_t blocked = KBD_MOD_CTRL | KBD_MOD_ALT | KBD_MOD_LOGO | KBD_MOD_FN;
+        if (elm->key_state != KBD_KEY_PRESSED || (elm->mods & blocked) ||
+            fzxc_to_arrow(elm->key_code) != elm->key_code)
+            return;
+        const uint32_t c = elm->codepoint;
+        if (c < 0x80 && std::isalnum(static_cast<int>(c)))
+            changed = list_jump(static_cast<char>(c));
+        break;
+    }
+    }
+    if (changed) audio_play_switch();
 }
 
 void UILaunchPage::on_left_arrow_clicked(lv_event_t *event) noexcept
