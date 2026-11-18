@@ -7,10 +7,13 @@
 #include "ui_launch_page.h"
 
 #include "launch.h"
+#include "hal_lvgl_bsp.h"
+#include "launcher_toast.h"
 #include "model/launcher_list_model.hpp"
 
 #include <algorithm>
 #include <cstdlib>
+#include <list>
 
 namespace {
 
@@ -38,6 +41,44 @@ lv_obj_t *create_list_row(lv_obj_t *parent, lv_coord_t y)
     lv_obj_set_style_radius(row, 6, selector);
     lv_obj_set_style_bg_color(row, lv_color_hex(0x444444), selector);
     return row;
+}
+
+void style_list_row(lv_obj_t *row, bool selected)
+{
+    const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
+    lv_obj_set_style_bg_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, selector);
+    lv_obj_set_style_text_color(row, lv_color_hex(selected ? 0xFFFFFF : 0x888888), selector);
+}
+
+std::string read_favorites()
+{
+    std::string stored;
+    try {
+        cp0_signal_config_api({"GetStr", kHomeFavoritesConfigKey, ""},
+                              [&](int code, std::string data) { if (code == 0) stored = std::move(data); });
+    } catch (...) {
+    }
+    return stored;
+}
+
+bool config_call(std::initializer_list<std::string> args)
+{
+    bool succeeded = false;
+    try {
+        cp0_signal_config_api(std::list<std::string>(args),
+                              [&](int code, std::string) { succeeded = code == 0; });
+    } catch (...) {
+    }
+    return succeeded;
+}
+
+// Same rollback as the Settings list-view toggle: SetStr is live at once, so undo it if Save fails.
+bool write_favorites(const std::string &previous, const std::string &desired)
+{
+    if (!config_call({"SetStr", kHomeFavoritesConfigKey, desired})) return false;
+    if (config_call({"Save"})) return true;
+    if (config_call({"SetStr", kHomeFavoritesConfigKey, previous})) (void)config_call({"Save"});
+    return false;
 }
 
 } // namespace
@@ -98,6 +139,10 @@ void UILaunchPage::create_list_view(lv_obj_t *parent)
 
 void UILaunchPage::forget_list_view()
 {
+    list_menu_ = nullptr;  // a child of list_container_, gone with it
+    list_menu_rows_.clear();
+    list_menu_items_.clear();
+    list_tab_armed_ = false;
     list_container_ = nullptr;
     list_rows_.fill(nullptr);
     list_cards_.fill(nullptr);
@@ -117,6 +162,7 @@ void UILaunchPage::delete_list_view()
 // is left to finish on the hidden carousel (its selection is already committed).
 void UILaunchPage::apply_home_view()
 {
+    close_list_menu();
     list_mode_ = launcher_home_list_view_enabled() && list_container_;
     if (carousel_container_) {
         if (list_mode_) lv_obj_add_flag(carousel_container_, LV_OBJ_FLAG_HIDDEN);
@@ -133,12 +179,15 @@ void UILaunchPage::apply_home_view()
 void UILaunchPage::rebuild_list_order()
 {
     list_names_.clear();
+    list_favorite_.clear();
+    const std::vector<std::string> favorites = launcher_favorites_parse(read_favorites());
     const size_t count = launch_ ? launch_->app_count() : 0;
     for (size_t i = 0; i < count; ++i) {
         const app *item = launch_->app_at(i);
         list_names_.push_back(item ? item->Name : std::string());
+        list_favorite_.push_back(item && std::find(favorites.begin(), favorites.end(), item->Exec) != favorites.end());
     }
-    list_order_ = launcher_alphabetical_order(list_names_);
+    list_order_ = launcher_list_order(list_names_, list_favorite_);
     const size_t selected = launch_ ? launch_->current_app_index() : 0;
     auto found = std::find(list_order_.begin(), list_order_.end(), selected);
     list_pos_ = found == list_order_.end() ? 0 : static_cast<size_t>(found - list_order_.begin());
@@ -147,6 +196,7 @@ void UILaunchPage::rebuild_list_order()
 void UILaunchPage::refresh_list_view()
 {
     if (!list_container_ || !list_mode_) return;
+    close_list_menu();  // the app list may have changed under it
     rebuild_list_order();
     update_list_view();
 }
@@ -160,7 +210,6 @@ void UILaunchPage::update_list_view()
     if (list_pos_ >= list_top_ + kListRows) list_top_ = list_pos_ + 1 - kListRows;
     if (count <= kListRows || list_top_ + kListRows > count) list_top_ = count > kListRows ? count - kListRows : 0;
 
-    const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
     for (size_t i = 0; i < kListRows; ++i) {
         lv_obj_t *row = list_rows_[i];
         if (!row) continue;
@@ -170,10 +219,10 @@ void UILaunchPage::update_list_view()
             continue;
         }
         lv_obj_clear_flag(row, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(row, list_names_[list_order_[position]].c_str());
-        const bool selected = position == list_pos_;
-        lv_obj_set_style_bg_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, selector);
-        lv_obj_set_style_text_color(row, lv_color_hex(selected ? 0xFFFFFF : 0x888888), selector);
+        const size_t index = list_order_[position];
+        // U+2605 exists in the row font (checked in the TTF); the LV_SYMBOL_* glyphs would not.
+        lv_label_set_text(row, ((list_favorite_[index] ? "\u2605 " : "") + list_names_[index]).c_str());
+        style_list_row(row, position == list_pos_);
     }
 
     // Thin thumb at the right edge showing the visible window; hidden when everything fits.
@@ -263,10 +312,110 @@ bool UILaunchPage::list_move(int delta, bool wrap)
 bool UILaunchPage::list_jump(char letter)
 {
     if (!launch_ || list_order_.empty()) return false;
-    const int next = launcher_list_jump(list_names_, list_order_, list_pos_, letter);
+    const int next = launcher_list_jump(list_names_, list_order_, list_pos_, letter, favorite_count());
     if (next < 0 || static_cast<size_t>(next) == list_pos_) return false;
     list_pos_ = static_cast<size_t>(next);
     launch_->select_app(list_order_[list_pos_]);
+    update_list_view();
+    return true;
+}
+
+size_t UILaunchPage::favorite_count() const
+{
+    return static_cast<size_t>(std::count(list_favorite_.begin(), list_favorite_.end(), 1));
+}
+
+// Space: next favorite, or the first one from elsewhere. Single steps slide like list_move.
+bool UILaunchPage::list_cycle_favorite()
+{
+    if (!launch_ || list_order_.empty()) return false;
+    const int next = launcher_favorite_next(list_pos_, favorite_count());
+    if (next < 0 || static_cast<size_t>(next) == list_pos_) return false;
+    const int delta = next - static_cast<int>(list_pos_);
+    if (delta == 1 || delta == -1) return list_move(delta, false);
+    list_pos_ = static_cast<size_t>(next);
+    launch_->select_app(list_order_[list_pos_]);
+    update_list_view();
+    return true;
+}
+
+// Tab menu. Items are rebuilt per open; Phase B pushes a Delete item (and handles it in activate_list_menu).
+void UILaunchPage::open_list_menu()
+{
+    if (list_menu_ || !launch_ || !list_container_ || list_order_.empty()) return;
+    const app *item = launch_->app_at(list_order_[list_pos_]);
+    if (!item) return;
+    list_menu_exec_ = item->Exec;
+    list_menu_items_ = {ListMenuAction::Favorite, ListMenuAction::Cancel};
+    list_menu_sel_ = 0;
+
+    const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
+    lv_obj_t *box = lv_obj_create(list_container_);
+    if (!box) return;
+    lv_obj_set_size(box, 200, static_cast<lv_coord_t>(list_menu_items_.size()) * kRowHeight + 6);
+    lv_obj_set_align(box, LV_ALIGN_CENTER);
+    lv_obj_clear_flag(box, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_style_pad_all(box, 0, selector);
+    lv_obj_set_style_radius(box, 8, selector);
+    lv_obj_set_style_bg_color(box, lv_color_hex(0x222222), selector);
+    lv_obj_set_style_bg_opa(box, LV_OPA_COVER, selector);
+    lv_obj_set_style_border_width(box, 1, selector);
+    lv_obj_set_style_border_color(box, lv_color_hex(0x666666), selector);
+
+    std::vector<lv_obj_t *> rows;
+    for (size_t i = 0; i < list_menu_items_.size(); ++i) {
+        lv_obj_t *row = create_list_row(box, static_cast<lv_coord_t>(i) * kRowHeight);
+        if (!row) {
+            lv_obj_delete(box);
+            return;
+        }
+        rows.push_back(row);
+    }
+    list_menu_ = box;
+    list_menu_rows_ = std::move(rows);
+    update_list_menu();
+}
+
+void UILaunchPage::close_list_menu()
+{
+    if (list_menu_) lv_obj_delete(list_menu_);
+    list_menu_ = nullptr;
+    list_menu_rows_.clear();
+    list_menu_items_.clear();
+    list_menu_exec_.clear();
+}
+
+void UILaunchPage::update_list_menu()
+{
+    if (!list_menu_) return;
+    const bool favorite = list_pos_ < list_order_.size() && list_favorite_[list_order_[list_pos_]];
+    for (size_t i = 0; i < list_menu_rows_.size(); ++i) {
+        const bool is_favorite_item = list_menu_items_[i] == ListMenuAction::Favorite;
+        lv_label_set_text(list_menu_rows_[i], is_favorite_item ? (favorite ? "Remove from favorites" : "Add to favorites")
+                                                               : "Cancel");
+        style_list_row(list_menu_rows_[i], i == list_menu_sel_);
+    }
+}
+
+void UILaunchPage::activate_list_menu(ListMenuAction action)
+{
+    close_list_menu();
+    if (action == ListMenuAction::Favorite) toggle_selected_favorite();
+}
+
+// Flip the favorite flag of the selected app; the order is rebuilt and the same app stays selected.
+bool UILaunchPage::toggle_selected_favorite()
+{
+    if (!launch_ || list_pos_ >= list_order_.size()) return false;
+    const app *item = launch_->app_at(list_order_[list_pos_]);
+    if (!item) return false;
+    const std::string previous = read_favorites();
+    const std::string desired = launcher_favorites_join(launcher_favorites_toggle(launcher_favorites_parse(previous), item->Exec));
+    if (!write_favorites(previous, desired)) {
+        launcher_toast().show("Unable to save favorites");
+        return false;
+    }
+    rebuild_list_order();
     update_list_view();
     return true;
 }
