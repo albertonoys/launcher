@@ -31,6 +31,8 @@ The available presets are:
 | Anthropic | `claude-sonnet-4` | `https://api.anthropic.com` | API key |
 | Ollama | `llama3.1` | `http://127.0.0.1:11434` | None |
 | DeepSeek | `deepseek-chat` | `https://api.deepseek.com` | API key |
+| Gemini | `gemini-flash-lite-latest` | `https://generativelanguage.googleapis.com/v1beta/openai` | API key |
+| Groq | `openai/gpt-oss-120b` | `https://api.groq.com/openai/v1` | API key |
 | Custom | Empty | `https://api.example.com/v1` | API URL, API key, and model name |
 
 For a custom provider, the API URL must begin with `http://` or `https://`. Quickstart uses the agent alias `zclaw` unless the saved UI configuration contains another alias.
@@ -78,7 +80,7 @@ The main settings page shows:
 - **Agent**: display the active agent alias.
 - **Transport**: display `WS` when paired or `Webhook` when no bearer token is saved.
 
-Provider records contain an alias, provider family, model, URI, and API key. Press `Delete` from a provider detail page to remove that record.
+Provider records contain an alias, provider family, model, URI, and API key. Select **Use Provider** on a provider detail page to make that record the Setup provider and run Quickstart with it, which rewrites the ZeroClaw configuration, restarts the service and pairs again. Press `Fn+Del` twice on a provider detail page to remove that record.
 
 ## Local files and secrets
 

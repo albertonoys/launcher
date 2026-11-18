@@ -25,6 +25,8 @@ public:
 
     bool update_setup_provider(const ProviderConfig &provider, std::string *error = nullptr);
     bool activate(const ProviderConfig &provider, std::string *error = nullptr);
+    // Makes the saved provider at index the Setup provider (moves it first).
+    bool promote(std::size_t index, std::string *error = nullptr);
     bool add(const ProviderConfig &provider, std::size_t *index = nullptr,
              std::string *error = nullptr);
     bool erase(std::size_t index, const ProviderConfig &empty_default,

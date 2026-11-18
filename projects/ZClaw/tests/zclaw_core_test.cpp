@@ -99,7 +99,7 @@ int main()
     assert(ui_loaded.bearer_token == ui_original.bearer_token);
     assert(ui_loaded.setup_complete == ui_original.setup_complete);
 
-    assert(zclaw::provider_preset_count() == 6);
+    assert(zclaw::provider_preset_count() == 8);
     const std::vector<ProviderConfig> defaults = zclaw::default_provider_configs();
     assert(defaults.size() == zclaw::provider_preset_count());
     assert(defaults.front().family == "openai");
@@ -107,10 +107,13 @@ int main()
     assert(std::string(zclaw::provider_display_name("anthropic")) == "Anthropic");
     assert(std::string(zclaw::provider_display_name("unknown")) == "Custom");
     assert(zclaw::provider_preset_index("ollama") == 3);
-    assert(zclaw::provider_preset_index("unknown") == 5);
+    assert(zclaw::provider_preset_index("unknown") == 7);
+    assert(zclaw::provider_preset_index("gemini") == 5);
+    assert(zclaw::provider_preset_index("groq") == 6);
+    assert(std::string(zclaw::provider_display_name("groq")) == "Groq");
     assert(zclaw::provider_preset(999).family == "custom");
 
-    ProviderConfig custom = zclaw::provider_preset(5);
+    ProviderConfig custom = zclaw::provider_preset(7);
     custom.api_key = "key";
     custom.uri = "https://example.com/v1";
     custom.model = "model";
@@ -210,9 +213,18 @@ int main()
     assert(settings_presentation.rows[0].title == original[0].alias);
     assert(settings_presentation.rows[1].title == original[1].alias);
     settings_presentation = zclaw::present_provider_detail(original[0]);
-    assert(settings_presentation.rows.size() == 6);
+    assert(settings_presentation.rows.size() == 7);
     assert(settings_presentation.rows[4].value == "set");
     assert(settings_presentation.rows[5].title == "API Type");
+    assert(settings_presentation.rows[6].title == "Use Provider");
+    assert(settings_presentation.rows[6].value == "Quickstart");
+    assert(settings_presentation.hint == "Enter / Fn+Del");
+    settings_presentation = zclaw::present_provider_detail(original[0], true, true);
+    assert(settings_presentation.rows[6].value == "Active");
+    assert(settings_presentation.hint == "Fn+Del again: delete");
+    // custom adds API Type, so its detail page needs every panel row
+    settings_presentation = zclaw::present_provider_detail(zclaw::provider_preset(7));
+    assert(settings_presentation.rows.size() == 7);  // SettingsPanel::kMaximumRows
     assert(zclaw::present_setup_progress().rows.empty());
 
     assert(::setenv("HOME", dir, 1) == 0);
@@ -439,9 +451,21 @@ int main()
     managed_setup.api_key = "setup-key";
     assert(provider_manager.update_setup_provider(managed_setup, &error));
     assert(provider_manager.setup_provider().api_key == "setup-key");
-    const ProviderConfig custom_preset = zclaw::provider_preset(5);
+    const ProviderConfig custom_preset = zclaw::provider_preset(7);
     assert(provider_manager.activate(custom_preset, &error));
     assert(provider_manager.setup_provider().family == "custom");
+    // promote moves a saved provider first without touching the others
+    const std::vector<ProviderConfig> before_promote = provider_manager.providers();
+    assert(provider_manager.promote(managed_index, &error));
+    assert(provider_manager.providers().front().alias == "managed");
+    assert(provider_manager.setup_provider().alias == "managed");
+    assert(provider_manager.providers().size() == before_promote.size());
+    assert(provider_manager.providers()[1].family == before_promote[0].family);
+    assert(!provider_manager.promote(before_promote.size(), &error));
+    zclaw::ProviderManager reloaded_manager(manager_path);
+    reloaded_manager.load();
+    assert(reloaded_manager.setup_provider().alias == "managed");
+    managed_index = 0;
     assert(provider_manager.erase(managed_index, zclaw::provider_preset(0), &error));
 
     zclaw::ProviderManager failing_manager(

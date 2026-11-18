@@ -37,6 +37,8 @@ public:
     void render();
     void update_progress(const SetupProgress &progress);
     void select_provider(int preset_index);
+    // Makes a saved provider the Setup provider and runs Quickstart with it.
+    void use_provider(int provider_index);
     void edit_selected_field();
     void apply_edit(const std::string &value);
     void start();
