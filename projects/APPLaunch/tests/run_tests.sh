@@ -226,6 +226,17 @@ ${CXX:-g++} -std=c++17 -Wall -Wextra -Werror \
     "$(dirname "$0")/../main/ui/model/launcher_navigation_model.cpp" \
     -o "$build_dir/test_launcher_navigation_model"
 "$build_dir/test_launcher_navigation_model"
+${CXX:-g++} -std=c++17 -Wall -Wextra -Werror \
+    "$(dirname "$0")/test_launcher_list_model.cpp" \
+    "$(dirname "$0")/../main/ui/model/launcher_list_model.cpp" \
+    -o "$build_dir/test_launcher_list_model"
+${CXX:-g++} -std=c++17 -Wall -Wextra -Werror \
+    -isystem "$test_root/../../../SDK/components/utilities/include" \
+    "$test_root/test_launcher_uninstall_model.cpp" \
+    "$test_root/../main/ui/model/launcher_uninstall_model.cpp" \
+    -o "$build_dir/test_launcher_uninstall_model"
+"$build_dir/test_launcher_uninstall_model"
+"$build_dir/test_launcher_list_model"
 ${CXX:-g++} -std=c++17 -Wall -Wextra -Werror -pthread \
     "$(dirname "$0")/test_app_registry_callback.cpp" \
     -o "$build_dir/test_app_registry_callback"

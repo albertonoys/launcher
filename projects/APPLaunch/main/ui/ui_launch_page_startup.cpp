@@ -34,6 +34,7 @@ void UILaunchPage::show_home_screen()
     if (!screen()) return;
     SLOGI("[HOME] loading launcher home screen");
     use_bold_home_title_font();
+    apply_home_view();
     lv_disp_load_scr(screen());
     bind_home_input_group();
 }

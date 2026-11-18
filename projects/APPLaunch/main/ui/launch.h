@@ -40,6 +40,7 @@ struct app
     std::string Name;
     std::string Icon;
     std::string Exec;
+    std::string StoreDesktopPath;  // absolute .desktop path; set only for StoreInstalled apps
     std::function<void(Launch *)> launch;
 
     app(std::string name, std::string icon, std::string exec, bool terminal);
@@ -68,6 +69,8 @@ public:
     std::size_t app_count() const;
     std::size_t current_app_index() const;
     const app *carousel_slot_app(size_t slot) const;
+    const app *app_at(std::size_t index) const { return app_at_index(static_cast<int>(index)); }
+    void select_app(std::size_t index);
     void launch_app();
 
 private:

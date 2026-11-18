@@ -5,11 +5,14 @@
  */
 
 #include "settings_adapter.hpp"
+#include "model/launcher_list_model.hpp"
 
 #include "cp0_lvgl_app.h"
 #include "hal_lvgl_bsp.h"
 
 #include <atomic>
+#include <charconv>
+#include <initializer_list>
 #include <cstdint>
 #include <exception>
 #include <list>
@@ -318,6 +321,42 @@ std::vector<launcher::AppEntry> launcher_app_entries()
 #endif
 }
 
+#ifdef LAUNCHER_BUILD
+bool list_view_config_call(std::initializer_list<std::string> args)
+{
+    bool succeeded = false;
+    try {
+        cp0_signal_config_api(std::list<std::string>(args),
+                              [&](int code, std::string) { succeeded = code == 0; });
+    } catch (...) {
+    }
+    return succeeded;
+}
+
+void list_view_toggle_api(int command, void *data)
+{
+    if ((command == SettingApiReadFlag || command == SettingApiReadFlagTimeStart) && data) {
+        const bool value = launcher_home_list_view_enabled();
+        if (command == SettingApiReadFlag) {
+            *static_cast<bool *>(data) = value;
+        } else {
+            mark_operation_started(data);
+            std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = value;
+        }
+        return;
+    }
+    if (command != SettingApiActivate) return;
+
+    const bool previous = launcher_home_list_view_enabled();
+    const char *desired = previous ? "0" : "1";
+    if (!list_view_config_call({"SetInt", kHomeListViewConfigKey, desired})) return;
+    if (list_view_config_call({"Save"})) return;
+    // SetInt changes the live config at once; undo it so the unsaved value is not seen later.
+    if (list_view_config_call({"SetInt", kHomeListViewConfigKey, previous ? "1" : "0"}))
+        (void)list_view_config_call({"Save"});
+}
+#endif
+
 bool populate_launcher_children(Tree &tree, const NodeIter &parent)
 {
 #ifdef LAUNCHER_BUILD
@@ -326,6 +365,7 @@ bool populate_launcher_children(Tree &tree, const NodeIter &parent)
     const AppDescriptor *entries = launcher_app_registry_entries(&count);
     if (count > 0 && !entries) return false;
 
+    tree.append_child(parent, SettingEntry{"List view", SettingApiCallBackFunc{list_view_toggle_api}, true});
     for (std::size_t index = 0; index < count; ++index) {
         const AppDescriptor &descriptor = entries[index];
         if (!descriptor.configurable || !descriptor.label || !descriptor.label[0] ||
@@ -587,3 +627,20 @@ void append_boot_children(Tree &tree,
 }
 
 } // namespace settings_t12b
+
+bool launcher_home_list_view_enabled()
+{
+    int value = 0;
+    try {
+        cp0_signal_config_api({"GetInt", kHomeListViewConfigKey, "0"},
+                              [&](int code, std::string data) {
+                                  int parsed = 0;
+                                  const char *end = data.data() + data.size();
+                                  const auto result = std::from_chars(data.data(), end, parsed);
+                                  if (code == 0 && result.ec == std::errc{} && result.ptr == end)
+                                      value = parsed;
+                              });
+    } catch (...) {
+    }
+    return value != 0;
+}
