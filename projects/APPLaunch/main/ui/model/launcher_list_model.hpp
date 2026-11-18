@@ -20,3 +20,8 @@ size_t launcher_list_step(size_t count, size_t position, int delta, bool wrap);
 // starts with `letter`, case-insensitive; -1 if none.
 int launcher_list_jump(const std::vector<std::string> &names, const std::vector<size_t> &order,
                        size_t position, char letter);
+
+// Launcher config int: 0 = carousel home screen (default), 1 = list view.
+// Defined in settings/settings_adapter.cpp, next to the Settings toggle.
+constexpr const char *kHomeListViewConfigKey = "home_list_view";
+bool launcher_home_list_view_enabled();
