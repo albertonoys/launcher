@@ -93,6 +93,9 @@ private:
     void update_list_view();
     bool list_move(int delta, bool wrap);
     bool list_jump(char letter);
+    void place_list_cards(int offset);
+    void stop_list_anim();
+    void start_list_anim(int dir);
     void delete_list_view();
     void forget_list_view();
     void handle_startup_gif_event(lv_event_t *event);
@@ -129,8 +132,9 @@ private:
     static constexpr size_t kListRows = 6;
     lv_obj_t *list_container_ = nullptr;
     std::array<lv_obj_t *, kListRows> list_rows_ = {};
-    lv_obj_t *list_card_ = nullptr;
-    lv_obj_t *list_name_ = nullptr;
+    // Vertical carousel: A-Z neighbours -2..+2 of the selection, centre card is index 2.
+    static constexpr size_t kListCards = 5;
+    std::array<lv_obj_t *, kListCards> list_cards_ = {};
     std::vector<std::string> list_names_;
     std::vector<size_t> list_order_;  // A-Z position -> index in Launch::app_list
     size_t list_pos_ = 0;
