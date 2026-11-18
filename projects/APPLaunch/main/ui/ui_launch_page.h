@@ -81,7 +81,8 @@ private:
         int code = -1;
     };
 
-    enum class ListMenuAction { Favorite, Cancel };
+    enum class ListMenuAction { Favorite, Delete, ConfirmDelete, Cancel };
+    struct DeleteJob;
     void create_app_container(lv_obj_t *parent);
     void switch_left();
     void switch_right();
@@ -100,6 +101,10 @@ private:
     bool list_cycle_favorite();
     size_t favorite_count() const;
     void open_list_menu();
+    void show_list_menu(const std::string &title, std::vector<ListMenuAction> items, size_t selected);
+    const app *selected_store_app() const;
+    void begin_list_delete();
+    void finish_list_delete(const std::string &exec, bool ok, const std::string &message);
     void close_list_menu();
     void handle_list_menu_key(const struct key_item *item, uint32_t code);
     void update_list_menu();
@@ -156,12 +161,14 @@ private:
     size_t list_top_ = 0;
     bool list_mode_ = false;
     // Tab menu: a child of list_container_ (deleted with it), built per open.
-    // Phase B adds ListMenuAction::Delete.
     lv_obj_t *list_menu_ = nullptr;
     std::vector<lv_obj_t *> list_menu_rows_;
     std::vector<ListMenuAction> list_menu_items_;
     size_t list_menu_sel_ = 0;
     std::string list_menu_exec_;  // favorite key of the app the menu was opened for
+    std::shared_ptr<bool> delete_alive_ = std::make_shared<bool>(true);  // false once the page is gone
+    bool delete_running_ = false;  // an uninstall job is in flight (it outlives the menu)
+    std::string delete_name_;
     bool list_tab_armed_ = false;  // Tab went down with the menu closed and nothing else since
     uint32_t list_tab_down_tick_ = 0;
     lv_timer_t *startup_sound_timer_ = nullptr;

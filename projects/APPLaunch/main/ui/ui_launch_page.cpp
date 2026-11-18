@@ -147,6 +147,7 @@ UILaunchPage::~UILaunchPage()
 {
     startup_sound_state_->alive.store(false);
     *carousel_alive_ = false;
+    *delete_alive_ = false;
     navigation_.cancel_navigation();
     if (carousel_container_) {
         lv_obj_remove_event_cb_with_user_data(
