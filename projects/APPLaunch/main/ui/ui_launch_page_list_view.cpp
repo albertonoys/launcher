@@ -77,14 +77,22 @@ void UILaunchPage::create_list_view(lv_obj_t *parent)
         lv_obj_set_style_border_opa(card, LV_OPA_COVER, selector);
         lv_obj_set_style_border_post(card, true, selector);
     }
-    if (!complete) {
+    lv_obj_t *scroll = lv_obj_create(container);
+    if (!complete || !scroll) {
         lv_obj_delete(container);
         return;
     }
+    const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
+    lv_obj_clear_flag(scroll, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_style_border_width(scroll, 0, selector);
+    lv_obj_set_style_radius(scroll, 1, selector);
+    lv_obj_set_style_bg_color(scroll, lv_color_hex(0x666666), selector);
+    lv_obj_set_style_bg_opa(scroll, LV_OPA_COVER, selector);
 
     list_container_ = container;
     list_rows_ = rows;
     list_cards_ = cards;
+    list_scroll_ = scroll;
     lv_obj_add_event_cb(container, on_owned_obj_deleted, LV_EVENT_DELETE, this);
 }
 
@@ -93,6 +101,7 @@ void UILaunchPage::forget_list_view()
     list_container_ = nullptr;
     list_rows_.fill(nullptr);
     list_cards_.fill(nullptr);
+    list_scroll_ = nullptr;
     lv_anim_delete(this, nullptr);
 }
 
@@ -165,6 +174,20 @@ void UILaunchPage::update_list_view()
         const bool selected = position == list_pos_;
         lv_obj_set_style_bg_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, selector);
         lv_obj_set_style_text_color(row, lv_color_hex(selected ? 0xFFFFFF : 0x888888), selector);
+    }
+
+    // Thin thumb at the right edge showing the visible window; hidden when everything fits.
+    if (list_scroll_) {
+        if (count <= kListRows) {
+            lv_obj_add_flag(list_scroll_, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            constexpr lv_coord_t kTrackTop = 4, kTrackHeight = 142;
+            const lv_coord_t thumb = std::max<lv_coord_t>(10, kTrackHeight * kListRows / count);
+            const lv_coord_t y = kTrackTop + (kTrackHeight - thumb) * list_top_ / (count - kListRows);
+            lv_obj_set_size(list_scroll_, 2, thumb);
+            lv_obj_set_pos(list_scroll_, 317, y);
+            lv_obj_clear_flag(list_scroll_, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     place_list_cards(0);

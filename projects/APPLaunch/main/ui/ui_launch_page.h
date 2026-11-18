@@ -139,6 +139,7 @@ private:
     // Vertical carousel: A-Z neighbours -2..+2 of the selection, centre card is index 2.
     static constexpr size_t kListCards = 5;
     std::array<lv_obj_t *, kListCards> list_cards_ = {};
+    lv_obj_t *list_scroll_ = nullptr;
     std::vector<std::string> list_names_;
     std::vector<size_t> list_order_;  // A-Z position -> index in Launch::app_list
     size_t list_pos_ = 0;
