@@ -10,12 +10,17 @@
 #include "model/launcher_list_model.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace {
 
 constexpr lv_coord_t kRowHeight = 24;
 constexpr lv_coord_t kRowsWidth = 190;
-constexpr lv_coord_t kCardSize = 100;
+constexpr lv_coord_t kCenterCard = 100;   // same sizes as the carousel, so the icon pool fits
+constexpr lv_coord_t kSideCard = 80;
+constexpr lv_coord_t kCardPitch = 99;     // centre-to-centre, as in the horizontal carousel
+constexpr lv_coord_t kCardX = 100;        // from the container centre: card centre at x=260
+constexpr int32_t kListAnimMs = 150;
 
 lv_obj_t *create_list_row(lv_obj_t *parent, lv_coord_t y)
 {
@@ -57,36 +62,29 @@ void UILaunchPage::create_list_view(lv_obj_t *parent)
         complete = complete && rows[i];
     }
 
-    // Same look as the carousel's centre card, so set_panel_icon sizes the icon the same way.
-    lv_obj_t *card = lv_obj_create(container);
-    lv_obj_t *name = lv_label_create(container);
-    if (!complete || !card || !name) {
+    std::array<lv_obj_t *, kListCards> cards = {};
+    for (lv_obj_t *&card : cards) {
+        card = lv_obj_create(container);
+        if (!card) {
+            lv_obj_delete(container);
+            return;
+        }
+        // Same look as the carousel's cards, so set_panel_icon sizes the icon the same way.
+        const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
+        lv_obj_set_align(card, LV_ALIGN_CENTER);
+        lv_obj_clear_flag(card, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+        lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, selector);
+        lv_obj_set_style_border_opa(card, LV_OPA_COVER, selector);
+        lv_obj_set_style_border_post(card, true, selector);
+    }
+    if (!complete) {
         lv_obj_delete(container);
         return;
     }
-    const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
-    lv_obj_set_size(card, kCardSize, kCardSize);
-    lv_obj_set_pos(card, 210, 8);
-    lv_obj_clear_flag(card, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
-    lv_obj_set_style_radius(card, 12, selector);
-    lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, selector);
-    lv_obj_set_style_border_color(card, lv_color_hex(0x444444), selector);
-    lv_obj_set_style_border_opa(card, LV_OPA_COVER, selector);
-    lv_obj_set_style_border_post(card, true, selector);
-
-    lv_obj_set_size(name, 120, LV_SIZE_CONTENT);
-    lv_obj_set_pos(name, 200, 112);
-    lv_obj_set_style_text_font(
-        name, launcher_fonts().get("Montserrat-Bold.ttf", 16, LV_FREETYPE_FONT_STYLE_BOLD), selector);
-    // Font first: DOT needs a one-line height, which comes from the font.
-    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, selector);
-    lv_obj_set_style_text_color(name, lv_color_hex(0xFFFFFF), selector);
 
     list_container_ = container;
     list_rows_ = rows;
-    list_card_ = card;
-    list_name_ = name;
+    list_cards_ = cards;
     lv_obj_add_event_cb(container, on_owned_obj_deleted, LV_EVENT_DELETE, this);
 }
 
@@ -94,8 +92,8 @@ void UILaunchPage::forget_list_view()
 {
     list_container_ = nullptr;
     list_rows_.fill(nullptr);
-    list_card_ = nullptr;
-    list_name_ = nullptr;
+    list_cards_.fill(nullptr);
+    lv_anim_delete(this, nullptr);
 }
 
 void UILaunchPage::delete_list_view()
@@ -146,6 +144,7 @@ void UILaunchPage::refresh_list_view()
 
 void UILaunchPage::update_list_view()
 {
+    stop_list_anim();
     const size_t count = list_order_.size();
     if (list_pos_ >= count) list_pos_ = 0;
     if (list_pos_ < list_top_) list_top_ = list_pos_;
@@ -168,9 +167,62 @@ void UILaunchPage::update_list_view()
         lv_obj_set_style_text_color(row, lv_color_hex(selected ? 0xFFFFFF : 0x888888), selector);
     }
 
-    const app *item = count ? launch_->app_at(list_order_[list_pos_]) : nullptr;
-    if (list_name_) lv_label_set_text(list_name_, item ? item->Name.c_str() : "");
-    set_panel_icon(list_card_, item ? item->Icon : std::string());
+    place_list_cards(0);
+    for (size_t i = 0; i < kListCards; ++i) {
+        lv_obj_t *card = list_cards_[i];
+        if (!card) continue;
+        // Side cards need a neighbour: with one app only the centre card shows.
+        if (count < 2 && i != kListCards / 2) {
+            lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_HIDDEN);
+        const app *item = nullptr;
+        if (count) item = launch_->app_at(list_order_[(list_pos_ + 2 * count + i - kListCards / 2) % count]);
+        set_panel_icon(card, item ? item->Icon : std::string());
+    }
+}
+
+// Card i sits at slot i-2 (pitch 99); offset slides all of them, sizes follow the distance from the centre.
+void UILaunchPage::place_list_cards(int offset)
+{
+    const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
+    for (size_t i = 0; i < kListCards; ++i) {
+        lv_obj_t *card = list_cards_[i];
+        if (!card) continue;
+        const int y = (static_cast<int>(i) - static_cast<int>(kListCards / 2)) * kCardPitch + offset;
+        const int far = std::min(std::abs(y), static_cast<int>(kCardPitch));
+        const lv_coord_t size = kCenterCard - (kCenterCard - kSideCard) * far / kCardPitch;
+        lv_obj_set_size(card, size, size);
+        lv_obj_set_pos(card, kCardX, y);
+        lv_obj_set_style_radius(card, 22 - 5 * far / kCardPitch, selector);
+        lv_obj_set_style_border_color(card, lv_color_hex(far * 2 < kCardPitch ? 0x444444 : 0x222222), selector);
+    }
+}
+
+void UILaunchPage::stop_list_anim()
+{
+    lv_anim_delete(this, nullptr);
+}
+
+// Slide from the previous layout (shifted by dir cards) to the rest layout; update_list_view already set the content.
+void UILaunchPage::start_list_anim(int dir)
+{
+    place_list_cards(dir * kCardPitch);
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, this);
+    lv_anim_set_values(&anim, dir * kCardPitch, 0);
+    lv_anim_set_duration(&anim, kListAnimMs);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&anim, [](void *var, int32_t value) {
+        static_cast<UILaunchPage *>(var)->place_list_cards(value);
+    });
+    // The slide leaves the icon scale of the old card size; redo it at the rest sizes.
+    lv_anim_set_completed_cb(&anim, [](lv_anim_t *a) {
+        static_cast<UILaunchPage *>(a->var)->update_list_view();
+    });
+    lv_anim_start(&anim);
 }
 
 bool UILaunchPage::list_move(int delta, bool wrap)
@@ -180,7 +232,9 @@ bool UILaunchPage::list_move(int delta, bool wrap)
     if (next == list_pos_) return false;
     list_pos_ = next;
     launch_->select_app(list_order_[list_pos_]);
-    update_list_view();
+    update_list_view();  // snaps any running slide to the new rest layout first
+    // Only a single step slides; with 2 apps the direction is ambiguous, so it snaps too.
+    if ((delta == 1 || delta == -1) && list_order_.size() > 2) start_list_anim(delta);
     return true;
 }
 

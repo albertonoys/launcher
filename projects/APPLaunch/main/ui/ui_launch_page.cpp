@@ -332,7 +332,8 @@ void UILaunchPage::reload_home_icons(const std::vector<std::string> &icon_paths)
     // Keep the old pool alive until every image widget no longer references it.
     for (size_t slot = 0; slot < launcher_carousel_layout::kPanelCount; ++slot)
         set_panel_icon(panel(slot), {});
-    set_panel_icon(list_card_, {});
+    for (lv_obj_t *card : list_cards_)
+        set_panel_icon(card, {});
     set_page_slider_range(icon_paths.size(), launch_ ? launch_->current_app_index() : 0);
     refresh_carousel();
 }
