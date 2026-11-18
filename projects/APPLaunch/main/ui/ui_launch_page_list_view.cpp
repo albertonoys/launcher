@@ -208,7 +208,22 @@ void UILaunchPage::refresh_list_view()
 {
     if (!list_container_ || !list_mode_) return;
     close_list_menu();  // the app list may have changed under it
+    // Launch keeps current_app as a product-order index, which points at another app once one is
+    // removed; keep the same app by name, or the one that took its list row.
+    const size_t old_pos = list_pos_;
+    const std::string old_name = list_pos_ < list_order_.size() && list_order_[list_pos_] < list_names_.size()
+                                     ? list_names_[list_order_[list_pos_]]
+                                     : std::string();
     rebuild_list_order();
+    if (!old_name.empty() && !list_order_.empty()) {
+        size_t pos = std::min(old_pos, list_order_.size() - 1);
+        for (size_t i = 0; i < list_order_.size(); ++i)
+            if (list_names_[list_order_[i]] == old_name) pos = i;
+        if (pos != list_pos_ && launch_) {
+            list_pos_ = pos;
+            launch_->select_app(list_order_[pos]);
+        }
+    }
     update_list_view();
 }
 
