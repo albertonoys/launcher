@@ -31,7 +31,7 @@ lv_obj_t *create_list_row(lv_obj_t *parent, lv_coord_t y)
     lv_label_set_long_mode(row, LV_LABEL_LONG_DOT);
     const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
     lv_obj_set_style_text_font(
-        row, launcher_fonts().get("Montserrat-Bold.ttf", 16, LV_FREETYPE_FONT_STYLE_BOLD), selector);
+        row, launcher_fonts().get("AlibabaPuHuiTi-3-55-Regular.ttf", 16, LV_FREETYPE_FONT_STYLE_NORMAL), selector);
     lv_obj_set_style_pad_left(row, 8, selector);
     lv_obj_set_style_pad_right(row, 8, selector);
     lv_obj_set_style_pad_top(row, 2, selector);
@@ -74,8 +74,8 @@ void UILaunchPage::create_list_view(lv_obj_t *parent)
         lv_obj_set_align(card, LV_ALIGN_CENTER);
         lv_obj_clear_flag(card, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
         lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, selector);
-        lv_obj_set_style_border_opa(card, LV_OPA_COVER, selector);
-        lv_obj_set_style_border_post(card, true, selector);
+        // Invisible border: keeps the carousel's icon size (and pool entries) without the frame.
+        lv_obj_set_style_border_opa(card, LV_OPA_TRANSP, selector);
     }
     lv_obj_t *scroll = lv_obj_create(container);
     if (!complete || !scroll) {
@@ -219,7 +219,6 @@ void UILaunchPage::place_list_cards(int offset)
         lv_obj_set_size(card, size, size);
         lv_obj_set_pos(card, kCardX, y);
         lv_obj_set_style_radius(card, 22 - 5 * far / kCardPitch, selector);
-        lv_obj_set_style_border_color(card, lv_color_hex(far * 2 < kCardPitch ? 0x444444 : 0x222222), selector);
     }
 }
 
