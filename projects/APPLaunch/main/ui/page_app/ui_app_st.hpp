@@ -38,32 +38,44 @@
 // ============================================================
 class UISTPage : public AppPage
 {
-    enum class FontSize : uint8_t {
-        Terminal = 12,
-    };
-
-    static constexpr int font_size(FontSize size)
-    {
-        return static_cast<int>(size);
-    }
+    // fn+G / shift+fn+G cycle the family, fn+R / fn+T step its sizes, fn+Y picks the one
+    // nearest JetBrains Mono 12px in height. The pixel fonts only list the sizes they are drawn for, so they stay sharp.
+    struct FontFace { int family; const char *file; int px; };
+    static constexpr std::array<FontFace, 30> FONT_FACES = {{
+        {0, "JetBrainsMono-Bold.ttf", 8}, {0, "JetBrainsMono-Bold.ttf", 9},
+        {0, "JetBrainsMono-Bold.ttf", 10}, {0, "JetBrainsMono-Bold.ttf", 11},
+        {0, "JetBrainsMono-Bold.ttf", 12}, {0, "JetBrainsMono-Bold.ttf", 14},
+        {0, "JetBrainsMono-Bold.ttf", 16}, {0, "JetBrainsMono-Bold.ttf", 18},
+        {0, "JetBrainsMono-Bold.ttf", 20},
+        {1, "spleen-6x12.otf", 12}, {1, "spleen-8x16.otf", 16}, {1, "spleen-12x24.otf", 24},
+        {2, "Tamzen5x9r.ttf", 9}, {2, "Tamzen6x12r.ttf", 12}, {2, "Tamzen7x13r.ttf", 13},
+        {2, "Tamzen7x14r.ttf", 14}, {2, "Tamzen8x15r.ttf", 15}, {2, "Tamzen8x16r.ttf", 16},
+        {2, "Tamzen10x20r.ttf", 20},
+        {3, "CozetteVector.ttf", 13}, {3, "CozetteVector.ttf", 26},
+        {4, "TerminusTTF-4.49.3.ttf", 12}, {4, "TerminusTTF-4.49.3.ttf", 14},
+        {4, "TerminusTTF-4.49.3.ttf", 16}, {4, "TerminusTTF-4.49.3.ttf", 18},
+        {4, "TerminusTTF-4.49.3.ttf", 20}, {4, "TerminusTTF-4.49.3.ttf", 22},
+        {4, "TerminusTTF-4.49.3.ttf", 24},
+        {5, "ProggyClean.ttf", 16}, {5, "ProggyClean.ttf", 32},
+    }};
+    static constexpr std::array<const char *, 6> FONT_FAMILY_NAMES = {
+        "JetBrains Mono", "Spleen", "Tamzen", "Cozette", "Terminus", "Proggy Clean"};
+    static constexpr int FONT_FAMILIES = 6;
+    // Line height fn+Y aims for: JetBrains Mono 12px.
+    static constexpr int DEFAULT_FONT_HEIGHT = 15;
+    static constexpr size_t DEFAULT_FONT_INDEX = 4;
 
     static constexpr int TERM_W = 320;
     static constexpr int TERM_H = 150;
-    // JetBrains Mono Bold at 12px resolves to a 7px advance and 15px line height in LVGL.
-    static constexpr int CHAR_W = 7;
-    static constexpr int CHAR_H = 15;
-    // Descenders in the 12px Bold face need the full 15px cell height.
+    // Descenders in the Bold face need the full cell height.
     static constexpr int TEXT_Y_PAD = 0;
-    static constexpr int NORMAL_COLS = TERM_W / CHAR_W;
-    static constexpr int NORMAL_ROWS = TERM_H / CHAR_H;
     static constexpr int BIG_COLS = 80;
     static constexpr int BIG_ROWS = 24;
     static constexpr int BIG_BOTTOM_H = 15;
-    static constexpr int BIG_VIEW_ROWS = (TERM_H - BIG_BOTTOM_H) / CHAR_H;
     static constexpr int MAX_COLS = BIG_COLS;
     static constexpr int MAX_ROWS = BIG_ROWS;
-    static constexpr int COLS = NORMAL_COLS;
-    static constexpr int ROWS = NORMAL_ROWS;
+    // Rows that can be on screen at once, at the smallest font.
+    static constexpr int MAX_VIEW_ROWS = MAX_ROWS;
     static constexpr int SCROLLBACK_MAX_ROWS = 200;
     static constexpr int SCROLLBAR_W = 3;
     static constexpr int BOTTOM_BAR_SLOTS = 5;
@@ -141,19 +153,24 @@ public:
 
 private:
     std::array<std::array<Glyph, MAX_COLS>, MAX_ROWS> screen_{};
-    std::array<std::vector<RenderSegment>, ROWS> row_segments_{};
-    std::array<bool, ROWS> dirty_{};
+    std::array<std::vector<RenderSegment>, MAX_VIEW_ROWS> row_segments_{};
+    std::array<bool, MAX_VIEW_ROWS> dirty_{};
     std::vector<std::array<Glyph, MAX_COLS>> scrollback_;
     int scrollback_offset_ = 0;
-    int term_cols_ = NORMAL_COLS;
-    int term_rows_ = NORMAL_ROWS;
+    // JetBrains Mono Bold at 12px resolves to a 7px advance and 15px line height in LVGL;
+    // load_fonts() measures the real values for the chosen size.
+    size_t font_index_ = DEFAULT_FONT_INDEX;
+    int char_w_ = 7;
+    int char_h_ = 15;
+    int term_cols_ = TERM_W / 7;
+    int term_rows_ = TERM_H / 15;
     int viewport_x_ = 0;
     int viewport_y_ = 0;
     bool big_view_locked_ = false;
     Cursor cursor_{};
     Cursor saved_cursor_{};
     int scroll_top_ = 0;
-    int scroll_bot_ = NORMAL_ROWS - 1;
+    int scroll_bot_ = TERM_H / 15 - 1;
     uint16_t mode_ = MODE_WRAP;
 
     ParseState parse_state_ = ParseState::Normal;
@@ -193,7 +210,16 @@ private:
     static int clamp(int v, int lo, int hi);
     static std::string printable(uint32_t u);
     static lv_color_t palette(uint32_t color);
-    static const lv_font_t *terminal_font();
+    bool load_fonts(const FontFace &face);
+    static size_t nearest_face(int family, int height);
+    static size_t saved_font_index();
+    bool set_font(size_t index);
+    void change_font_size(int step);
+    void cycle_font_family(int step);
+    void pty_resize();
+    int normal_cols() const;
+    int normal_rows() const;
+    int big_view_rows() const;
     static uint32_t xterm256_to_palette(int color);
     static uint32_t rgb_to_palette(int r, int g, int b);
 

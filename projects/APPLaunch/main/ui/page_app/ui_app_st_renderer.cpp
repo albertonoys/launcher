@@ -7,6 +7,8 @@
 #define APP_PAGE_IMPLEMENTATION_UNIT
 #include "ui_app_st.hpp"
 #include "../model/st_key_encoder.hpp"
+#include <cstdlib>
+#include "../launcher_toast.h"
 
 void UISTPage::create_ui()
 {
@@ -55,9 +57,9 @@ void UISTPage::create_ui()
     create_scrollbar(&scrollbar_thumb_, SCROLLBAR_W, 8,
                      TERM_W - SCROLLBAR_W - 1, TERM_H - 8, 0x8B949E);
     create_scrollbar(&hscrollbar_track_, TERM_W - SCROLLBAR_W - 2, 3,
-                     0, BIG_VIEW_ROWS * CHAR_H, 0x30363D);
+                     0, big_view_rows() * char_h_, 0x30363D);
     create_scrollbar(&hscrollbar_thumb_, 18, 3,
-                     0, BIG_VIEW_ROWS * CHAR_H, 0x8B949E);
+                     0, big_view_rows() * char_h_, 0x8B949E);
 
     static constexpr const char *BOTTOM_TEXT[BOTTOM_BAR_SLOTS] = {
         "F4 " LV_SYMBOL_LEFT, "F5 " LV_SYMBOL_UP, "F6 normal",
@@ -92,18 +94,11 @@ void UISTPage::create_ui()
         }
     }
 
-    lv_font_t *primary = launcher_fonts().get(
-        "JetBrainsMono-Bold.ttf", font_size(FontSize::Terminal),
-        LV_FREETYPE_FONT_STYLE_NORMAL, LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
-    lv_font_t *cjk = launcher_fonts().get(
-        "AlibabaPuHuiTi-3-55-Regular.ttf", font_size(FontSize::Terminal),
-        LV_FREETYPE_FONT_STYLE_NORMAL, LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
-    lv_font_t *symbols = launcher_fonts().get(
-        "DejaVuSansMono.ttf", font_size(FontSize::Terminal),
-        LV_FREETYPE_FONT_STYLE_NORMAL, LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
-    if (cjk && symbols && cjk != symbols) cjk->fallback = symbols;
-    if (primary && cjk && primary != cjk) primary->fallback = cjk;
-    mono_font_ = primary;
+    font_index_ = saved_font_index();
+    if (!load_fonts(FONT_FACES[font_index_])) {
+        font_index_ = DEFAULT_FONT_INDEX;
+        load_fonts(FONT_FACES[font_index_]);
+    }
     cursor_label_ = lv_label_create(term_canvas_);
     if (!cursor_label_) return;
     lv_obj_add_event_cb(cursor_label_, static_renderer_delete_cb, LV_EVENT_DELETE, this);
@@ -115,9 +110,157 @@ void UISTPage::create_ui()
     lv_obj_set_style_pad_top(cursor_label_, TEXT_Y_PAD, 0);
     lv_obj_set_style_text_letter_space(cursor_label_, 0, 0);
     lv_label_set_long_mode(cursor_label_, LV_LABEL_LONG_CLIP);
-    lv_obj_set_size(cursor_label_, CHAR_W, CHAR_H);
+    lv_obj_set_size(cursor_label_, char_w_, char_h_);
     lv_label_set_text(cursor_label_, " ");
     lv_obj_add_flag(cursor_label_, LV_OBJ_FLAG_HIDDEN);
+}
+
+bool UISTPage::load_fonts(const FontFace &face)
+{
+    const int pixel_size = face.px;
+    lv_font_t *primary = launcher_fonts().get(
+        face.file, pixel_size,
+        LV_FREETYPE_FONT_STYLE_NORMAL, LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
+    if (!primary) return false;
+    lv_font_t *cjk = launcher_fonts().get(
+        "AlibabaPuHuiTi-3-55-Regular.ttf", pixel_size,
+        LV_FREETYPE_FONT_STYLE_NORMAL, LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
+    lv_font_t *symbols = launcher_fonts().get(
+        "DejaVuSansMono.ttf", pixel_size,
+        LV_FREETYPE_FONT_STYLE_NORMAL, LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
+    if (cjk && symbols && cjk != symbols) cjk->fallback = symbols;
+    if (cjk && primary != cjk) primary->fallback = cjk;
+
+    int advance = lv_font_get_glyph_width(primary, 'M', 0);
+    int line_height = lv_font_get_line_height(primary);
+    if (advance <= 0 || line_height <= 0) return false;
+    mono_font_ = primary;
+    char_w_ = advance;
+    char_h_ = line_height;
+    return true;
+}
+
+void UISTPage::pty_resize()
+{
+    if (pty_handle_.empty()) return;
+    cp0_signal_pty_api({"Resize", pty_handle_, std::to_string(term_cols_),
+                        std::to_string(term_rows_)},
+                       nullptr);
+}
+
+size_t UISTPage::nearest_face(int family, int target)
+{
+    // fn+R / fn+T step to the neighbouring face, so each family must be contiguous and ascending.
+    static_assert([] {
+        for (size_t i = 1; i < FONT_FACES.size(); ++i) {
+            const FontFace &a = FONT_FACES[i - 1], &b = FONT_FACES[i];
+            if (b.family < a.family || b.family > a.family + 1 || (b.family == a.family && b.px <= a.px))
+                return false;
+        }
+        return FONT_FACES.back().family == FONT_FAMILIES - 1 &&
+               FONT_FAMILY_NAMES.size() == static_cast<size_t>(FONT_FAMILIES);
+    }(), "FONT_FACES must be grouped by family in ascending size");
+    // JetBrains Mono's line is ~1.25x its pixel size; the pixel fonts' line is their size.
+    auto height = [](const FontFace &f) { return f.family == 0 ? f.px * 5 / 4 : f.px; };
+    size_t best = FONT_FACES.size();
+    for (size_t i = 0; i < FONT_FACES.size(); ++i) {
+        if (FONT_FACES[i].family != family) continue;
+        if (best == FONT_FACES.size() ||
+            std::abs(height(FONT_FACES[i]) - target) < std::abs(height(FONT_FACES[best]) - target))
+            best = i;
+    }
+    return best;
+}
+
+// The CLI app's font is kept in the launcher config as "<file>:<px>".
+static constexpr const char *CLI_FONT_KEY = "cli_font";
+
+size_t UISTPage::saved_font_index()
+{
+    std::string saved;
+    cp0_signal_config_api({"GetStr", CLI_FONT_KEY, ""},
+                          [&](int code, std::string data) { if (code == 0) saved = std::move(data); });
+    for (size_t i = 0; i < FONT_FACES.size(); ++i)
+        if (saved == std::string(FONT_FACES[i].file) + ":" + std::to_string(FONT_FACES[i].px)) return i;
+    return DEFAULT_FONT_INDEX;
+}
+
+void UISTPage::change_font_size(int step)
+{
+    if (step == 0) {  // fn+Y
+        set_font(nearest_face(FONT_FACES[font_index_].family, DEFAULT_FONT_HEIGHT));
+        return;
+    }
+    int index = static_cast<int>(font_index_) + step;
+    if (index < 0 || index >= static_cast<int>(FONT_FACES.size()) ||
+        FONT_FACES[static_cast<size_t>(index)].family != FONT_FACES[font_index_].family)
+        return;
+    set_font(static_cast<size_t>(index));
+}
+
+void UISTPage::cycle_font_family(int step)
+{
+    const int family = FONT_FACES[font_index_].family;
+    // Skip a family whose font file is missing.
+    for (int tries = 1; tries < FONT_FAMILIES; ++tries) {
+        int next = ((family + step * tries) % FONT_FAMILIES + FONT_FAMILIES) % FONT_FAMILIES;
+        if (set_font(nearest_face(next, char_h_))) return;
+    }
+}
+
+bool UISTPage::set_font(size_t index)
+{
+    if (index >= FONT_FACES.size() || index == font_index_) return false;
+    if (!load_fonts(FONT_FACES[index])) {
+        load_fonts(FONT_FACES[font_index_]);
+        return false;
+    }
+    font_index_ = index;
+    const FontFace &face = FONT_FACES[index];
+    cp0_signal_config_api({"SetManyAndSave", CLI_FONT_KEY, std::string(face.file) + ":" + std::to_string(face.px)},
+                          [](int, std::string) {});
+    const std::string name = std::string(FONT_FAMILY_NAMES[static_cast<size_t>(face.family)]) + " " +
+                             std::to_string(face.px) + "px";
+    launcher_toast().show(name.c_str(), true);
+
+    for (auto &row : row_segments_)
+        for (auto &segment : row)
+            if (segment.label) lv_obj_set_style_text_font(segment.label, mono_font_, 0);
+    if (cursor_label_) lv_obj_set_style_text_font(cursor_label_, mono_font_, 0);
+
+    if (big_mode_) {
+        // The 80x24 grid stays; only the window onto it changes.
+        viewport_x_ = clamp(viewport_x_, 0, max_viewport_x());
+        viewport_y_ = clamp(viewport_y_, 0, max_viewport_y());
+    } else {
+        int old_cols = term_cols_;
+        int old_rows = term_rows_;
+        int new_cols = normal_cols();
+        int new_rows = normal_rows();
+        // Keep the cursor line on screen: push the top rows into scrollback.
+        int overflow = cursor_.y - (new_rows - 1);
+        if (overflow > 0) {
+            scroll_up(0, old_rows - 1, overflow);
+            cursor_.y -= overflow;
+            saved_cursor_.y = std::max(0, saved_cursor_.y - overflow);
+        }
+        term_cols_ = new_cols;
+        term_rows_ = new_rows;
+        Glyph blank = blank_glyph();
+        for (int y = 0; y < MAX_ROWS; ++y)
+            for (int x = 0; x < MAX_COLS; ++x)
+                if (y >= old_rows || x >= old_cols) screen_[y][x] = blank;
+        scroll_top_ = 0;
+        scroll_bot_ = term_rows_ - 1;
+        cursor_.x = clamp(cursor_.x, 0, term_cols_ - 1);
+        cursor_.y = clamp(cursor_.y, 0, term_rows_ - 1);
+        saved_cursor_.x = clamp(saved_cursor_.x, 0, term_cols_ - 1);
+        saved_cursor_.y = clamp(saved_cursor_.y, 0, term_rows_ - 1);
+        pty_resize();
+    }
+    dirty_all();
+    render_all();
+    return true;
 }
 
 void UISTPage::create_help()
@@ -335,6 +478,16 @@ void UISTPage::event_cb(lv_event_t *event)
         switch_big_mode(!big_mode_);
         return;
     }
+    // fn + R / T / Y: the keys printed - + = on the symbol layer. fn + G: next font.
+    if (key->key_state && (key->mods & KBD_MOD_FN)) {
+        switch (key->key_code) {
+        case KEY_R: change_font_size(-1); return;
+        case KEY_T: change_font_size(1); return;
+        case KEY_Y: change_font_size(0); return;
+        case KEY_G: cycle_font_family((key->mods & KBD_MOD_SHIFT) ? -1 : 1); return;
+        default: break;
+        }
+    }
     if (key->key_state && big_mode_) {
         switch (key->key_code) {
         case KEY_F4: pan_big_view(-8, 0); render_all(); return;
@@ -397,7 +550,7 @@ lv_obj_t *UISTPage::create_segment_label()
     lv_obj_set_style_text_letter_space(label, 0, 0);
     lv_obj_set_style_text_line_space(label, 0, 0);
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_size(label, CHAR_W, CHAR_H);
+    lv_obj_set_size(label, char_w_, char_h_);
     lv_label_set_text(label, " ");
     lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
     return label;
@@ -474,7 +627,7 @@ void UISTPage::render_row(int row)
         RenderSegment &current = rendered[index];
         if (!current.label) current.label = create_segment_label();
         if (!current.label) continue;
-        int width = wanted.columns * CHAR_W;
+        int width = wanted.columns * char_w_;
         bool changed = current.hidden || current.x != wanted.x || current.width != width ||
                        current.fg != wanted.fg || current.bg != wanted.bg ||
                        current.text != wanted.text;
@@ -487,8 +640,8 @@ void UISTPage::render_row(int row)
         current.bg = wanted.bg;
         current.text = wanted.text;
         lv_obj_clear_flag(current.label, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(current.label, wanted.x * CHAR_W, row * CHAR_H);
-        lv_obj_set_size(current.label, width, CHAR_H);
+        lv_obj_set_pos(current.label, wanted.x * char_w_, row * char_h_);
+        lv_obj_set_size(current.label, width, char_h_);
         lv_obj_set_style_text_color(current.label, palette(wanted.fg), 0);
         lv_obj_set_style_bg_color(current.label, palette(wanted.bg), 0);
         lv_label_set_text(current.label, wanted.text.c_str());
@@ -506,7 +659,7 @@ void UISTPage::render_row(int row)
 void UISTPage::render_all()
 {
     int visible_row_count = visible_rows();
-    for (int row = 0; row < ROWS; ++row) {
+    for (int row = 0; row < MAX_VIEW_ROWS; ++row) {
         if (row >= visible_row_count) {
             if (dirty_[row]) {
                 for (auto &segment : row_segments_[row]) {
@@ -556,8 +709,8 @@ void UISTPage::update_cursor()
     lv_label_set_text(cursor_label_, text.c_str());
     lv_obj_set_style_text_color(cursor_label_, palette(background), 0);
     lv_obj_set_style_bg_color(cursor_label_, palette(foreground), 0);
-    lv_obj_set_pos(cursor_label_, x * CHAR_W, y * CHAR_H);
-    lv_obj_set_size(cursor_label_, std::max<int>(1, glyph.columns) * CHAR_W, CHAR_H);
+    lv_obj_set_pos(cursor_label_, x * char_w_, y * char_h_);
+    lv_obj_set_size(cursor_label_, std::max<int>(1, glyph.columns) * char_w_, char_h_);
     lv_obj_move_foreground(cursor_label_);
 }
 
