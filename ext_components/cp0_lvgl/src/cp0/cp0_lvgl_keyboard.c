@@ -201,6 +201,7 @@ struct kbd_ctx {
     bool fn_pressed;
     uint64_t fn_pressed_at_ms;
     unsigned int input_context_generation;
+    const char *device_path;
 };
 
 static uint64_t monotonic_ms(void)
@@ -210,15 +211,29 @@ static uint64_t monotonic_ms(void)
     return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
 }
 
+/* A latched fn stays down, so check before treating it as a lost release. */
+static bool fn_still_down(const char *path)
+{
+    unsigned char keys[KEY_MAX / 8 + 1] = {0};
+    int fd = path ? open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC) : -1;
+    if (fd < 0) return false;
+    bool down = ioctl(fd, EVIOCGKEY(sizeof(keys)), keys) >= 0 &&
+                (((keys[KEY_DVD / 8] >> (KEY_DVD % 8)) & 1) || ((keys[KEY_FN / 8] >> (KEY_FN % 8)) & 1));
+    close(fd);
+    return down;
+}
+
 static void recover_stale_fn(struct kbd_ctx *kc)
 {
     const unsigned int generation = atomic_load_explicit(
         &keyboard_input_context_generation, memory_order_acquire);
     const uint64_t now = monotonic_ms();
-    if (kc->input_context_generation != generation ||
-        (kc->fn_pressed && now - kc->fn_pressed_at_ms >= 10000u)) {
+    if (kc->input_context_generation != generation) {
         kc->fn_pressed = false;
         kc->input_context_generation = generation;
+    } else if (kc->fn_pressed && now - kc->fn_pressed_at_ms >= 10000u) {
+        if (fn_still_down(kc->device_path)) kc->fn_pressed_at_ms = now;
+        else kc->fn_pressed = false;
     }
 }
 
@@ -362,8 +377,10 @@ static void process_key(struct kbd_ctx *kc, uint32_t code, int pressed)
     item.key_state = pressed ? KBD_KEY_PRESSED : KBD_KEY_RELEASED;
     item.input_context = cp0_keyboard_get_input_context();
     item.semantic_key = cp0_keyboard_semantic_key(code, item.input_context);
-    const bool fn_active = kc->fn_pressed || (code == KEY_FN && pressed);
-    if (code == KEY_FN) {
+    // The CardputerZero keymap sends KEY_DVD for fn.
+    const bool fn_key = code == KEY_FN || code == KEY_DVD;
+    const bool fn_active = kc->fn_pressed || (fn_key && pressed);
+    if (fn_key) {
         kc->fn_pressed = pressed;
         if (pressed) kc->fn_pressed_at_ms = monotonic_ms();
     }
@@ -569,6 +586,7 @@ void *keyboard_read_thread(void *argv) {
 
     struct kbd_ctx kc = {0};
     kc.repeat_fd = -1;
+    kc.device_path = device_path;
 
     /* ---------- 1. libinput ---------- */
     kc.li = libinput_path_create_context(&interface, NULL);
