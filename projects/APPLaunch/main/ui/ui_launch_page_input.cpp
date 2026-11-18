@@ -144,6 +144,7 @@ void UILaunchPage::handle_list_menu_key(const struct key_item *elm, uint32_t cod
         return;
     }
     const size_t count = list_menu_items_.size();
+    if (delete_running_ && code == KEY_TAB) return;  // only Esc hides the "Deleting" box
     if (code == KEY_ESC || code == KEY_TAB) {
         audio_play_switch();
         close_list_menu();

@@ -9,11 +9,16 @@
 #include "launch.h"
 #include "hal_lvgl_bsp.h"
 #include "launcher_toast.h"
+#include "launcher_platform.hpp"
 #include "model/launcher_list_model.hpp"
+#include "model/launcher_uninstall_model.hpp"
 
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <list>
+#include <sstream>
+#include <thread>
 
 namespace {
 
@@ -345,20 +350,41 @@ bool UILaunchPage::list_cycle_favorite()
     return true;
 }
 
-// Tab menu. Items are rebuilt per open; Phase B pushes a Delete item (and handles it in activate_list_menu).
+// Tab menu. Items are rebuilt per open and per step (actions -> delete confirmation -> deleting).
 void UILaunchPage::open_list_menu()
 {
     if (list_menu_ || !launch_ || !list_container_ || list_order_.empty()) return;
+    if (delete_running_) {  // the job outlives a hidden menu; only show its state again
+        show_list_menu("Deleting " + delete_name_ + "...", {}, 0);
+        return;
+    }
     const app *item = launch_->app_at(list_order_[list_pos_]);
     if (!item) return;
     list_menu_exec_ = favorite_key(*item);
-    list_menu_items_ = {ListMenuAction::Favorite, ListMenuAction::Cancel};
-    list_menu_sel_ = 0;
+    std::vector<ListMenuAction> items = {ListMenuAction::Favorite};
+    if (!item->StoreDesktopPath.empty()) items.push_back(ListMenuAction::Delete);
+    items.push_back(ListMenuAction::Cancel);
+    show_list_menu("", std::move(items), 0);
+}
+
+// Replaces the menu box; list_menu_exec_ survives. A non-empty title adds an unselectable first row.
+void UILaunchPage::show_list_menu(const std::string &title, std::vector<ListMenuAction> items, size_t selected)
+{
+    if (!list_container_) return;
+    const std::string exec = list_menu_exec_;
+    close_list_menu();
+    list_menu_exec_ = exec;
+    list_menu_items_ = std::move(items);
+    list_menu_sel_ = selected;
+    const lv_coord_t top = title.empty() ? 0 : kRowHeight;
 
     const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
     lv_obj_t *box = lv_obj_create(list_container_);
-    if (!box) return;
-    lv_obj_set_size(box, 200, static_cast<lv_coord_t>(list_menu_items_.size()) * kRowHeight + 6);
+    if (!box) {
+        close_list_menu();
+        return;
+    }
+    lv_obj_set_size(box, 200, top + static_cast<lv_coord_t>(list_menu_items_.size()) * kRowHeight + 6);
     lv_obj_set_align(box, LV_ALIGN_CENTER);
     lv_obj_clear_flag(box, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     lv_obj_set_style_pad_all(box, 0, selector);
@@ -368,14 +394,30 @@ void UILaunchPage::open_list_menu()
     lv_obj_set_style_border_width(box, 1, selector);
     lv_obj_set_style_border_color(box, lv_color_hex(0x666666), selector);
 
+    bool complete = true;
+    if (!title.empty()) {
+        lv_obj_t *label = create_list_row(box, 0);
+        if (label) {
+            lv_label_set_text(label, title.c_str());
+            style_list_row(label, false);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), selector);
+        } else {
+            complete = false;
+        }
+    }
     std::vector<lv_obj_t *> rows;
-    for (size_t i = 0; i < list_menu_items_.size(); ++i) {
-        lv_obj_t *row = create_list_row(box, static_cast<lv_coord_t>(i) * kRowHeight);
+    for (size_t i = 0; complete && i < list_menu_items_.size(); ++i) {
+        lv_obj_t *row = create_list_row(box, top + static_cast<lv_coord_t>(i) * kRowHeight);
         if (!row) {
-            lv_obj_delete(box);
-            return;
+            complete = false;
+            break;
         }
         rows.push_back(row);
+    }
+    if (!complete) {
+        lv_obj_delete(box);
+        close_list_menu();
+        return;
     }
     list_menu_ = box;
     list_menu_rows_ = std::move(rows);
@@ -396,17 +438,231 @@ void UILaunchPage::update_list_menu()
     if (!list_menu_) return;
     const bool favorite = list_pos_ < list_order_.size() && list_favorite_[list_order_[list_pos_]];
     for (size_t i = 0; i < list_menu_rows_.size(); ++i) {
-        const bool is_favorite_item = list_menu_items_[i] == ListMenuAction::Favorite;
-        lv_label_set_text(list_menu_rows_[i], is_favorite_item ? (favorite ? "Remove from favorites" : "Add to favorites")
-                                                               : "Cancel");
+        const char *text = "Cancel";
+        switch (list_menu_items_[i]) {
+        case ListMenuAction::Favorite: text = favorite ? "Remove from favorites" : "Add to favorites"; break;
+        case ListMenuAction::Delete:
+        case ListMenuAction::ConfirmDelete: text = "Delete"; break;
+        case ListMenuAction::Cancel: break;
+        }
+        lv_label_set_text(list_menu_rows_[i], text);
         style_list_row(list_menu_rows_[i], i == list_menu_sel_);
     }
 }
 
 void UILaunchPage::activate_list_menu(ListMenuAction action)
 {
+    if (action == ListMenuAction::Delete) {
+        const app *item = selected_store_app();
+        if (!item) {
+            close_list_menu();
+            return;
+        }
+        show_list_menu("Delete " + item->Name + "?", {ListMenuAction::ConfirmDelete, ListMenuAction::Cancel}, 1);
+        return;
+    }
+    if (action == ListMenuAction::ConfirmDelete) {
+        begin_list_delete();
+        return;
+    }
     close_list_menu();
     if (action == ListMenuAction::Favorite) toggle_selected_favorite();
+}
+
+// Uninstall through the App Store backend so its records stay right (never run for stock apps):
+// user-side prepare on a worker thread, the root helper via cp0_sudo, user-side finalize on a worker.
+// Every hop back to the UI goes through lv_async_call; delete_alive_ guards a page that is gone by then.
+struct UILaunchPage::DeleteJob {
+    UILaunchPage *page = nullptr;
+    std::weak_ptr<bool> alive;
+    std::string name, exec, desktop_path, backend, installed_path, app_id, output, error;
+    LauncherUninstallJob job;
+
+    static int capture(const std::vector<std::string> &args, std::string &out)
+    {
+        std::vector<const char *> argv;
+        for (const std::string &arg : args) argv.push_back(arg.c_str());
+        argv.push_back(nullptr);
+        char buffer[8192];
+        const int rc = cp0_process_capture_argv(argv.data(), buffer, sizeof(buffer));
+        out = buffer;
+        return rc;
+    }
+
+    static void post(const std::shared_ptr<DeleteJob> &self, lv_async_cb_t callback)
+    {
+        auto *holder = new (std::nothrow) std::shared_ptr<DeleteJob>(self);
+        if (holder && lv_async_call(callback, holder) != LV_RESULT_OK) delete holder;
+        // shortcut: a failed post leaves the job unreported, only possible when out of memory
+    }
+
+    static std::shared_ptr<DeleteJob> take(void *user)
+    {
+        std::unique_ptr<std::shared_ptr<DeleteJob>> holder(static_cast<std::shared_ptr<DeleteJob> *>(user));
+        return holder ? *holder : nullptr;
+    }
+
+    static void finish(const std::shared_ptr<DeleteJob> &self)
+    {
+        const bool ok = self->error.empty();
+        const std::string message = ok ? "Deleted " + self->name : self->error;
+        const auto alive = self->alive.lock();
+        if (alive && *alive) self->page->finish_list_delete(self->exec, ok, message);
+        else launcher_toast().show(message.c_str());
+    }
+
+    static void prepare(const std::shared_ptr<DeleteJob> &self)  // worker thread
+    {
+        std::ifstream file(self->installed_path);
+        std::stringstream contents;
+        contents << file.rdbuf();
+        self->app_id = launcher_uninstall_find_app_id(contents.str(), self->desktop_path);
+        if (self->app_id.empty()) {
+            self->error = "Not installed by the App Store; remove it with apt";
+        } else {
+            std::string out;
+            capture({self->backend, "--prepare-package", "uninstall", self->app_id}, out);
+            if (!launcher_uninstall_parse_job(out, self->job)) {
+                self->error = launcher_uninstall_first_error(out);
+                if (self->error.empty()) self->error = "Unable to prepare the uninstall";
+            }
+        }
+        post(self, after_prepare);
+    }
+
+    static void after_prepare(void *user) noexcept
+    {
+        try {
+            auto self = take(user);
+            if (!self) return;
+            if (self->error.empty()) start_sudo(self);
+            if (!self->error.empty()) finish(self);
+        } catch (...) {
+        }
+    }
+
+    static void start_sudo(const std::shared_ptr<DeleteJob> &self)
+    {
+        const std::vector<std::string> args = launcher_uninstall_helper_argv(self->backend, self->job);
+        std::vector<const char *> argv;
+        for (const std::string &arg : args) argv.push_back(arg.c_str());
+        argv.push_back(nullptr);
+        auto *holder = new std::shared_ptr<DeleteJob>(self);
+        // Same timeouts as the App Store's sudo runner: 60 s to authenticate, 2 h + margin to run.
+        const int rc = cp0_sudo_run_argv_async_ex(argv.data(), CP0_SUDO_CALLBACK_LVGL, sudo_output,
+                                                  sudo_complete, holder, 60 * 1000, 7500000, nullptr);
+        if (rc != 0) {
+            delete holder;
+            self->error = "Unable to start sudo request";
+        }
+    }
+
+    static void sudo_output(const char *data, size_t size, void *user)
+    {
+        auto *self = static_cast<std::shared_ptr<DeleteJob> *>(user);
+        if (data && self && (*self)->output.size() < 65536) (*self)->output.append(data, size);
+    }
+
+    static void sudo_complete(cp0_sudo_result_t result, int exit_code, void *user)
+    {
+        try {
+            auto self = take(user);
+            if (!self) return;
+            if (result == CP0_SUDO_RESULT_SUCCESS) {
+                try {
+                    std::thread([self] { finalize(self); }).detach();
+                    return;
+                } catch (...) {
+                    self->error = "Unable to start the finalize step";
+                }
+            } else if (result == CP0_SUDO_RESULT_AUTH_FAILED) {
+                self->error = "Sudo authentication failed";
+            } else if (result == CP0_SUDO_RESULT_CANCELLED) {
+                self->error = "Delete cancelled";
+            } else if (result == CP0_SUDO_RESULT_TIMED_OUT) {
+                self->error = "Delete timed out";
+            } else {
+                self->error = launcher_uninstall_first_error(self->output);
+                if (self->error.empty()) self->error = "Delete failed (" + std::to_string(exit_code) + ")";
+            }
+            finish(self);
+        } catch (...) {
+        }
+    }
+
+    static void finalize(const std::shared_ptr<DeleteJob> &self)  // worker thread
+    {
+        std::string out;
+        const int rc = capture({self->backend, "--finalize-package", "uninstall", self->app_id,
+                                self->job.transaction_id}, out);
+        self->error = launcher_uninstall_first_error(out);
+        if (self->error.empty() && rc != 0) self->error = "Unable to finalize the uninstall";
+        post(self, after_finalize);
+    }
+
+    static void after_finalize(void *user) noexcept
+    {
+        try {
+            if (auto self = take(user)) finish(self);
+        } catch (...) {
+        }
+    }
+};
+
+// The menu captures keys, so the selection is still the app it was opened for.
+const app *UILaunchPage::selected_store_app() const
+{
+    if (!launch_ || list_pos_ >= list_order_.size()) return nullptr;
+    const app *item = launch_->app_at(list_order_[list_pos_]);
+    return item && !item->StoreDesktopPath.empty() ? item : nullptr;
+}
+
+void UILaunchPage::begin_list_delete()
+{
+    if (delete_running_ || !launch_) return;
+    // Re-check the origin here: stock apps are never deleted, whatever menu state got us here.
+    const app *item = selected_store_app();
+    if (!item) {
+        close_list_menu();
+        return;
+    }
+    auto job = std::make_shared<DeleteJob>();
+    job->page = this;
+    job->alive = delete_alive_;
+    job->name = item->Name;
+    job->exec = favorite_key(*item);
+    job->desktop_path = item->StoreDesktopPath;
+    job->backend = launcher_platform::path("appstore_exec");
+    job->installed_path = launcher_platform::path("home_dir") + "/.local/share/cardputerzero-appstore/installed.json";
+    if (job->backend.empty()) {
+        close_list_menu();
+        launcher_toast().show("App Store not found");
+        return;
+    }
+    delete_running_ = true;
+    delete_name_ = job->name;
+    show_list_menu("Deleting " + delete_name_ + "...", {}, 0);
+    try {
+        std::thread([job] { DeleteJob::prepare(job); }).detach();
+    } catch (...) {
+        job->error = "Unable to start the delete";
+        DeleteJob::finish(job);
+    }
+}
+
+// UI thread, after the job ended. The app list itself reloads through the applications directory watcher.
+void UILaunchPage::finish_list_delete(const std::string &exec, bool ok, const std::string &message)
+{
+    delete_running_ = false;
+    delete_name_.clear();
+    close_list_menu();  // only the "Deleting" box can be open while a job runs
+    if (ok) {
+        const std::string previous = read_favorites();
+        std::vector<std::string> favorites = launcher_favorites_parse(previous);
+        if (std::find(favorites.begin(), favorites.end(), exec) != favorites.end())
+            (void)write_favorites(previous, launcher_favorites_join(launcher_favorites_toggle(favorites, exec)));
+    }
+    launcher_toast().show(message.c_str());
 }
 
 // Flip the favorite flag of the selected app; the order is rebuilt and the same app stays selected.
