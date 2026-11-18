@@ -210,7 +210,7 @@ void SettingsCoordinator::render_providers()
     panel_.update_selection(state_.selected_row());
 }
 
-void SettingsCoordinator::render_provider_detail()
+void SettingsCoordinator::render_provider_detail(bool confirm_delete)
 {
     state_.set_view(SettingsView::ProviderDetail);
     const int provider_index = state_.provider_detail_index();
@@ -219,7 +219,8 @@ void SettingsCoordinator::render_provider_detail()
         render_providers();
         return;
     }
-    apply(present_provider_detail(providers_.providers()[provider_index]));
+    apply(present_provider_detail(providers_.providers()[provider_index],
+                                  provider_index == 0, confirm_delete));
     state_.clamp_rows(panel_.row_count());
     panel_.update_selection(state_.selected_row());
 }

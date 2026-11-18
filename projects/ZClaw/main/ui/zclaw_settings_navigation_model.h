@@ -42,6 +42,7 @@ enum class SettingsActivationAction {
     AddProvider,
     ShowProviderDetail,
     EditProviderField,
+    UseProvider,
 };
 
 struct SettingsActivationContext {

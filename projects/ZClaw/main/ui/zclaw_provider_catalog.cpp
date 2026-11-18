@@ -16,12 +16,16 @@ struct ProviderPreset {
     ProviderConfig config;
 };
 
-const std::array<ProviderPreset, 6> kProviderPresets = {{
+// Custom must stay last: unknown families fall back to the last preset.
+const std::array<ProviderPreset, 8> kProviderPresets = {{
     {"OpenAI", {"zclaw", "openai", "gpt-4.1-mini", "https://api.openai.com/v1", ""}},
     {"OpenRouter", {"zclaw", "openrouter", "openrouter/auto", "https://openrouter.ai/api/v1", ""}},
     {"Anthropic", {"zclaw", "anthropic", "claude-sonnet-4", "https://api.anthropic.com", ""}},
     {"Ollama", {"zclaw", "ollama", "llama3.1", "http://127.0.0.1:11434", ""}},
     {"DeepSeek", {"zclaw", "deepseek", "deepseek-chat", "https://api.deepseek.com", ""}},
+    {"Gemini", {"zclaw", "gemini", "gemini-flash-lite-latest",
+                "https://generativelanguage.googleapis.com/v1beta/openai", ""}},
+    {"Groq", {"zclaw", "groq", "openai/gpt-oss-120b", "https://api.groq.com/openai/v1", ""}},
     {"Custom", {"zclaw", "custom", "", "https://api.example.com/v1", ""}},
 }};
 

@@ -147,7 +147,12 @@ int main()
     context.selected_row = 1;
     assert(zclaw::settings_activation(context).action == SettingsActivationAction::None);
     context.view = SettingsView::ProviderDetail;
+    context.setup_initialize_row = 6;
+    context.selected_row = 2;
     assert(zclaw::settings_activation(context).action ==
            SettingsActivationAction::EditProviderField);
+    context.selected_row = 6;
+    assert(zclaw::settings_activation(context).action ==
+           SettingsActivationAction::UseProvider);
     return 0;
 }

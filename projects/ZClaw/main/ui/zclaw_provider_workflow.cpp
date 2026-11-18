@@ -50,12 +50,14 @@ void ProviderWorkflow::add()
 
 void ProviderWorkflow::open_detail(int provider_index)
 {
+    delete_armed_index_ = -1;
     settings_.state().open_provider_detail(provider_index);
     settings_.render_provider_detail();
 }
 
 void ProviderWorkflow::edit_selected_field()
 {
+    delete_armed_index_ = -1;
     const int provider_index = settings_.state().provider_detail_index();
     if (provider_index < 0 ||
         provider_index >= static_cast<int>(providers_.providers().size()))
@@ -115,6 +117,12 @@ void ProviderWorkflow::delete_current()
     if (provider_index < 0 ||
         provider_index >= static_cast<int>(providers_.providers().size()))
         return;
+    if (delete_armed_index_ != provider_index) {
+        delete_armed_index_ = provider_index;
+        settings_.render_provider_detail(true);
+        return;
+    }
+    delete_armed_index_ = -1;
     std::string error;
     if (!providers_.erase(static_cast<std::size_t>(provider_index),
                           provider_preset(0), &error)) {
