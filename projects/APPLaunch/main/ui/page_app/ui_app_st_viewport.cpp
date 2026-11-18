@@ -106,8 +106,8 @@ void UISTPage::switch_big_mode(bool enable)
     stop_timers();
     stop_pty();
     big_mode_ = enable;
-    term_cols_ = big_mode_ ? BIG_COLS : NORMAL_COLS;
-    term_rows_ = big_mode_ ? BIG_ROWS : NORMAL_ROWS;
+    term_cols_ = big_mode_ ? BIG_COLS : normal_cols();
+    term_rows_ = big_mode_ ? BIG_ROWS : normal_rows();
     viewport_x_ = 0;
     viewport_y_ = 0;
     big_view_locked_ = false;

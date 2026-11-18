@@ -58,8 +58,8 @@ void UISTPage::exec(const std::string &command, const std::list<std::string> &ar
     waiting_key_to_exit_ = false;
     hide_help();
     big_mode_ = false;
-    term_cols_ = NORMAL_COLS;
-    term_rows_ = NORMAL_ROWS;
+    term_cols_ = normal_cols();
+    term_rows_ = normal_rows();
     viewport_x_ = 0;
     viewport_y_ = 0;
     big_view_locked_ = false;
@@ -105,11 +105,19 @@ lv_color_t UISTPage::palette(uint32_t color)
     return lv_color_hex(COLORS[color < 16 ? color : DEFAULT_FG]);
 }
 
-const lv_font_t *UISTPage::terminal_font()
+int UISTPage::normal_cols() const
 {
-    return launcher_fonts().get("JetBrainsMono-Bold.ttf", font_size(FontSize::Terminal),
-                                LV_FREETYPE_FONT_STYLE_NORMAL,
-                                LV_FREETYPE_FONT_RENDER_MODE_BITMAP);
+    return std::min(MAX_COLS, TERM_W / char_w_);
+}
+
+int UISTPage::normal_rows() const
+{
+    return std::min(MAX_VIEW_ROWS, TERM_H / char_h_);
+}
+
+int UISTPage::big_view_rows() const
+{
+    return std::min(MAX_VIEW_ROWS, (TERM_H - BIG_BOTTOM_H) / char_h_);
 }
 
 uint32_t UISTPage::xterm256_to_palette(int color)
@@ -158,7 +166,7 @@ void UISTPage::dirty_row(int row)
         if (view_row >= 0 && view_row < visible_rows()) dirty_[view_row] = true;
         return;
     }
-    if (row >= 0 && row < ROWS) dirty_[row] = true;
+    if (row >= 0 && row < MAX_VIEW_ROWS) dirty_[row] = true;
 }
 
 void UISTPage::dirty_all()
@@ -177,17 +185,17 @@ void UISTPage::dirty_all()
 
 int UISTPage::visible_cols() const
 {
-    return NORMAL_COLS;
+    return normal_cols();
 }
 
 int UISTPage::visible_rows() const
 {
-    return big_mode_ ? BIG_VIEW_ROWS : NORMAL_ROWS;
+    return big_mode_ ? big_view_rows() : normal_rows();
 }
 
 int UISTPage::visible_h() const
 {
-    return visible_rows() * CHAR_H;
+    return visible_rows() * char_h_;
 }
 
 int UISTPage::max_viewport_x() const

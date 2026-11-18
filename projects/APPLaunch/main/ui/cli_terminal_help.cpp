@@ -45,6 +45,9 @@ lv_obj_t *create_cli_help(lv_obj_t *parent)
                       "shift + fn + L: page up\n"
                       "shift + fn + M: page down\n\n"
                       "F6 (fn + 6): enter / exit Viewport mode\n"
-                      "F4/F5/F7/F8 (fn + 4/5/7/8): pan the viewport");
+                      "F4/F5/F7/F8 (fn + 4/5/7/8): pan the viewport\n"
+                      "fn + R / T (- / +): smaller / bigger text\n"
+                      "fn + Y (=): default text size\n"
+                      "fn + G / shift + fn + G: next / previous font");
     return overlay;
 }
