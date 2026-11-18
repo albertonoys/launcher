@@ -17,6 +17,7 @@
 #include <vector>
 
 class Launch;
+struct key_item;
 
 class UILaunchPage : public home_base
 {
@@ -55,6 +56,7 @@ public:
     void update_carousel_item(lv_obj_t *panel, lv_obj_t *label, const char *title,
                               const std::string &icon);
     void launch_selected_app();
+    void refresh_list_view();
 
 protected:
     std::array<lv_obj_t *, kLauncherCarouselElementCount> carousel_elements_ = {};
@@ -87,6 +89,15 @@ private:
     void finish_switch_animation();
     void cancel_switch_animation();
     void handle_home_key(lv_event_t *event);
+    void handle_list_key(const struct key_item *item, uint32_t code);
+    void create_list_view(lv_obj_t *parent);
+    void apply_home_view();
+    void rebuild_list_order();
+    void update_list_view();
+    bool list_move(int delta, bool wrap);
+    bool list_jump(char letter);
+    void delete_list_view();
+    void forget_list_view();
     void handle_startup_gif_event(lv_event_t *event);
     void play_startup_sound_with_retry();
     void warm_up_audio_mixer();
@@ -119,6 +130,16 @@ private:
     lv_obj_t *left_arrow_button_ = nullptr;
     lv_obj_t *right_arrow_button_ = nullptr;
     lv_obj_t *carousel_container_ = nullptr;
+    static constexpr size_t kListRows = 6;
+    lv_obj_t *list_container_ = nullptr;
+    std::array<lv_obj_t *, kListRows> list_rows_ = {};
+    lv_obj_t *list_card_ = nullptr;
+    lv_obj_t *list_name_ = nullptr;
+    std::vector<std::string> list_names_;
+    std::vector<size_t> list_order_;  // A-Z position -> index in Launch::app_list
+    size_t list_pos_ = 0;
+    size_t list_top_ = 0;
+    bool list_mode_ = false;
     lv_timer_t *startup_sound_timer_ = nullptr;
     lv_timer_t *startup_delay_timer_ = nullptr;
     StartupTimerContext *startup_sound_context_ = nullptr;
