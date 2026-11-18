@@ -1522,6 +1522,7 @@ void show_update_progress(LvSettingUpdatePage3 *page,
     // Live counter line (percent, package index, updated/failed so far).
     state->progress_detail = lv_label_create(content);
     if (state->progress_detail) {
+        lv_label_set_text(state->progress_detail, "");
         lv_obj_set_width(state->progress_detail, lv_pct(100));
         lv_label_set_long_mode(state->progress_detail, LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_color(
@@ -1533,6 +1534,7 @@ void show_update_progress(LvSettingUpdatePage3 *page,
     // the remaining packages continue.
     state->progress_notice = lv_label_create(content);
     if (state->progress_notice) {
+        lv_label_set_text(state->progress_notice, "");
         lv_obj_set_width(state->progress_notice, lv_pct(100));
         lv_label_set_long_mode(state->progress_notice, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_color(
