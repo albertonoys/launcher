@@ -50,6 +50,12 @@ void style_list_row(lv_obj_t *row, bool selected)
     lv_obj_set_style_text_color(row, lv_color_hex(selected ? 0xFFFFFF : 0x888888), selector);
 }
 
+// Built-in pages have no Exec, so they are keyed by name.
+std::string favorite_key(const app &item)
+{
+    return item.Exec.empty() ? "name:" + item.Name : item.Exec;
+}
+
 std::string read_favorites()
 {
     std::string stored;
@@ -185,7 +191,7 @@ void UILaunchPage::rebuild_list_order()
     for (size_t i = 0; i < count; ++i) {
         const app *item = launch_->app_at(i);
         list_names_.push_back(item ? item->Name : std::string());
-        list_favorite_.push_back(item && std::find(favorites.begin(), favorites.end(), item->Exec) != favorites.end());
+        list_favorite_.push_back(item && std::find(favorites.begin(), favorites.end(), favorite_key(*item)) != favorites.end());
     }
     list_order_ = launcher_list_order(list_names_, list_favorite_);
     const size_t selected = launch_ ? launch_->current_app_index() : 0;
@@ -345,7 +351,7 @@ void UILaunchPage::open_list_menu()
     if (list_menu_ || !launch_ || !list_container_ || list_order_.empty()) return;
     const app *item = launch_->app_at(list_order_[list_pos_]);
     if (!item) return;
-    list_menu_exec_ = item->Exec;
+    list_menu_exec_ = favorite_key(*item);
     list_menu_items_ = {ListMenuAction::Favorite, ListMenuAction::Cancel};
     list_menu_sel_ = 0;
 
@@ -410,7 +416,7 @@ bool UILaunchPage::toggle_selected_favorite()
     const app *item = launch_->app_at(list_order_[list_pos_]);
     if (!item) return false;
     const std::string previous = read_favorites();
-    const std::string desired = launcher_favorites_join(launcher_favorites_toggle(launcher_favorites_parse(previous), item->Exec));
+    const std::string desired = launcher_favorites_join(launcher_favorites_toggle(launcher_favorites_parse(previous), favorite_key(*item)));
     if (!write_favorites(previous, desired)) {
         launcher_toast().show("Unable to save favorites");
         return false;

@@ -161,7 +161,7 @@ private:
     std::vector<lv_obj_t *> list_menu_rows_;
     std::vector<ListMenuAction> list_menu_items_;
     size_t list_menu_sel_ = 0;
-    std::string list_menu_exec_;  // Exec of the app the menu was opened for
+    std::string list_menu_exec_;  // favorite key of the app the menu was opened for
     bool list_tab_armed_ = false;  // Tab went down with the menu closed and nothing else since
     uint32_t list_tab_down_tick_ = 0;
     lv_timer_t *startup_sound_timer_ = nullptr;
