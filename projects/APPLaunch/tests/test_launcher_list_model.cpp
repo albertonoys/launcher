@@ -44,4 +44,39 @@ int main()
     assert(launcher_list_jump(n2, o2, 0, '!') == -1);  // non-alphanumeric letter
     assert(launcher_list_jump(n2, o2, 5, 'x') == -1);
     assert(launcher_list_jump({}, {}, 0, 'a') == -1);
+
+    // favorites first, both groups A-Z, stable
+    std::vector<std::string> n3 = {"zeta", "Beta", "alpha", "BETA", "Alpha"};
+    assert((launcher_list_order(n3, {0, 0, 0, 1, 1}) == std::vector<size_t>{4, 3, 2, 1, 0}));
+    assert((launcher_list_order(n3, {1, 1}) == std::vector<size_t>{1, 0, 2, 4, 3}));  // short flags: rest are not favorites
+    assert((launcher_list_order(n3, {}) == launcher_alphabetical_order(n3)));
+    assert(launcher_list_order({}, {1}).empty());
+
+    // stored favorites
+    assert(launcher_favorites_parse("").empty());
+    assert((launcher_favorites_parse("\n/a b\n\n/c\n") == std::vector<std::string>{"/a b", "/c"}));
+    assert(launcher_favorites_join({}) == "");
+    assert(launcher_favorites_join({"/a", "/b"}) == "/a\n/b");
+    assert((launcher_favorites_toggle({"/a"}, "/b") == std::vector<std::string>{"/a", "/b"}));
+    assert((launcher_favorites_toggle({"/a", "/b"}, "/a") == std::vector<std::string>{"/b"}));
+    assert((launcher_favorites_toggle({"/a"}, "") == std::vector<std::string>{"/a"}));
+    assert((launcher_favorites_toggle({"/a"}, "x\ny") == std::vector<std::string>{"/a"}));
+
+    // jump skips the favorites block
+    std::vector<std::string> n4 = {"Apple", "Avocado", "Banana", "Apricot"};
+    auto o4 = launcher_list_order(n4, {1, 0, 0, 0});  // Apple | Apricot, Avocado, Banana
+    assert((o4 == std::vector<size_t>{0, 3, 1, 2}));
+    assert(launcher_list_jump(n4, o4, 0, 'a', 1) == 1);  // from the favorite: first non-favorite match
+    assert(launcher_list_jump(n4, o4, 1, 'a', 1) == 2);
+    assert(launcher_list_jump(n4, o4, 2, 'a', 1) == 1);  // wraps inside the non-favorites
+    assert(launcher_list_jump(n4, o4, 0, 'b', 1) == 3);
+    assert(launcher_list_jump(n4, o4, 0, 'a', 4) == -1);  // everything is a favorite
+    assert(launcher_list_jump({"Apple", "Zed"}, launcher_list_order({"Apple", "Zed"}, {1, 0}), 1, 'a', 1) == -1);
+
+    // space cycles favorites
+    assert(launcher_favorite_next(3, 0) == -1);
+    assert(launcher_favorite_next(5, 2) == 0);  // non-favorite
+    assert(launcher_favorite_next(0, 2) == 1);
+    assert(launcher_favorite_next(1, 2) == 0);  // last wraps
+    assert(launcher_favorite_next(0, 1) == 0);
 }
