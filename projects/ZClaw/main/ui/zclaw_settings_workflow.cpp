@@ -144,6 +144,9 @@ void SettingsWorkflow::activate_selection()
     case SettingsActivationAction::EditProviderField:
         provider_workflow_.edit_selected_field();
         break;
+    case SettingsActivationAction::UseProvider:
+        setup_.use_provider(settings_.state().provider_detail_index());
+        break;
     }
 }
 

@@ -92,10 +92,11 @@ SettingsPresentation present_providers(const std::vector<ProviderConfig> &provid
     return presentation;
 }
 
-SettingsPresentation present_provider_detail(const ProviderConfig &provider)
+SettingsPresentation present_provider_detail(const ProviderConfig &provider,
+                                             bool active, bool confirm_delete)
 {
     SettingsPresentation presentation = {
-        "Provider", "Enter / Del", {
+        "Provider", confirm_delete ? "Fn+Del again: delete" : "Enter / Fn+Del", {
             {"Alias", provider.alias},
             {"Family", provider.family},
             {"Model", provider.model},
@@ -104,6 +105,7 @@ SettingsPresentation present_provider_detail(const ProviderConfig &provider)
         }};
     if (provider.family == "custom")
         presentation.rows.push_back({"API Type", provider.wire_api});
+    presentation.rows.push_back({"Use Provider", active ? "Active" : "Quickstart"});
     return presentation;
 }
 

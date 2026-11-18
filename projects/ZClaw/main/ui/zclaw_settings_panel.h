@@ -17,7 +17,7 @@ class FontManager;
 
 class SettingsPanel {
 public:
-    static constexpr int kMaximumRows = 6;
+    static constexpr int kMaximumRows = 7;  // custom provider detail: 6 fields + Use Provider
 
     SettingsPanel() = default;
     ~SettingsPanel();

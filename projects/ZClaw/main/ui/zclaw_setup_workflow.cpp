@@ -74,6 +74,21 @@ void SetupWorkflow::select_provider(int preset_index)
     render();
 }
 
+void SetupWorkflow::use_provider(int provider_index)
+{
+    if (in_flight_ || provider_index < 0 ||
+        provider_index >= static_cast<int>(providers_.providers().size()))
+        return;
+    std::string error;
+    if (!providers_.promote(static_cast<std::size_t>(provider_index), &error)) {
+        report_save_error(error);
+        return;
+    }
+    settings_.state().close_provider_detail();
+    settings_.state().set_selected_row(0);
+    start();
+}
+
 void SetupWorkflow::edit_selected_field()
 {
     settings_.state().set_setup_edit_field(setup_edit_field_for_row(
