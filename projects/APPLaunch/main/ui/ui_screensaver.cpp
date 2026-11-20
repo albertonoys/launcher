@@ -22,8 +22,12 @@
 #include "ui_app_page.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
 #include <future>
 #include <string>
+#include <unistd.h>
 #include <utility>
 
 namespace {
@@ -211,14 +215,48 @@ void update_timer_period()
     lv_timer_set_period(s_timer, s_model.hold_pending() ? kHoldPollMs : kIdleCheckMs);
 }
 
+/* The backlight node carries a power-supply regulator (DT: /backlight, regulator
+ * "backlight-regulator", regulator-boot-on), so writing brightness 0 cuts the
+ * panel's power. The panel comes back uninitialised: it keeps the old image or a
+ * black one and ignores new frames until its init sequence runs again, and that
+ * only happens on a DRM unblank. Blank with the panel and unblank after the
+ * power is back, so every wake re-initialises it. Both writes go to the sysfs
+ * attribute, which zero-setup.sh leaves writable by group video; if they fail
+ * the launcher keeps working exactly as before. */
+static void panel_blank(bool blank) noexcept
+{
+    const char *device = getenv("APPLAUNCH_LINUX_FBDEV_DEVICE");
+    char name[32] = "fb0";
+    if (device && device[0]) {
+        char target[32] = {0};
+        const char *base = std::strrchr(device, '/');
+        base = base ? base + 1 : device;
+        if (readlink(device, target, sizeof(target) - 1) > 0)
+            std::snprintf(name, sizeof(name), "%s", target);
+        else if (std::strncmp(base, "fb", 2) == 0)
+            std::snprintf(name, sizeof(name), "%s", base);
+    }
+    char path[96];
+    std::snprintf(path, sizeof(path), "/sys/class/graphics/%s/blank", name);
+    const int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    const char value = blank ? '1' : '0';
+    (void)!write(fd, &value, 1);
+    close(fd);
+}
+
 void suspend_screen_off_backlight() noexcept
 {
     if (s_screen_off_backlight_raw >= 0) return;
+    /* Stop the panel while it still has power, then cut it. */
+    panel_blank(true);
     try {
         s_screen_off_backlight_raw = launcher_media_controls::suspend_backlight();
     } catch (...) {
         s_screen_off_backlight_raw = -1;
     }
+    if (s_screen_off_backlight_raw < 0)
+        panel_blank(false);
 }
 
 void release_screen_off_backlight() noexcept
@@ -229,6 +267,16 @@ void release_screen_off_backlight() noexcept
     s_screen_off_backlight_raw = -1;
     try {
         launcher_media_controls::restore_backlight(raw);
+    } catch (...) {
+    }
+    /* Power is back: let DRM run the panel's init sequence, then throw away
+     * whatever the display thinks it already shows. */
+    panel_blank(false);
+    try {
+        if (lv_obj_t *screen = lv_screen_active())
+            lv_obj_invalidate(screen);
+        if (lv_obj_t *top = lv_layer_top())
+            lv_obj_invalidate(top);
     } catch (...) {
     }
 }
@@ -495,10 +543,12 @@ void enter_lockscreen()
 /* (2)/(3): restore the backlight and replace the top-bar title with the hint. */
 void show_lockscreen_panel()
 {
+    /* Power the panel back up and re-init it before anything is painted, so the
+     * frame below is the first one it takes after waking. */
+    release_screen_off_backlight();
     apply_panel(wake_panel());
     lv_obj_move_foreground(s_overlay);
     lv_obj_clear_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
-    release_screen_off_backlight();
     show_hint(s_lock.state() == LockscreenState::Armed
                   ? "Press ENTER to unlock"
                   : "Press TAB to unlock");
