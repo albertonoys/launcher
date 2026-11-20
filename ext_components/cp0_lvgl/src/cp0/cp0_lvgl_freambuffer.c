@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <fcntl.h>
+#include <linux/fb.h>
+#include <sys/ioctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,6 +100,48 @@ static void panel_resync(const char *device)
     }
 }
 
+/* This driver's deferred IO never reports the page faults of LVGL's framebuffer mmap on this panel,
+ * so a frame written with memcpy is never pushed to the glass: only full repaints (fbcon, a
+ * blank/unblank cycle, a write()) ever arrive. Write the flushed rows with pwrite() instead - fb_write
+ * reports the exact damage range, so the panel follows the UI and only the dirty area is sent over
+ * SPI. force_refresh would push the whole frame on every flush and makes the UI lag. (todo #36) */
+static int s_flush_fd = -1;
+static uint32_t s_fb_line_length = 0;
+
+static void pwrite_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p)
+{
+    if (s_flush_fd < 0 || s_fb_line_length == 0) {
+        lv_display_flush_ready(disp);
+        return;
+    }
+    const lv_color_format_t cf = lv_display_get_color_format(disp);
+    const uint32_t px_size = lv_color_format_get_size(cf);
+    const int32_t w = lv_area_get_width(area);
+    const size_t row_bytes = (size_t)w * px_size;
+    const uint32_t src_stride = lv_draw_buf_width_to_stride(w, cf);
+    off_t pos = (off_t)area->y1 * s_fb_line_length + (off_t)area->x1 * px_size;
+    for (int32_t y = area->y1; y <= area->y2; ++y) {
+        (void)!pwrite(s_flush_fd, color_p, row_bytes, pos);
+        color_p += src_stride;
+        pos += s_fb_line_length;
+    }
+    lv_display_flush_ready(disp);
+}
+
+static void use_pwrite_flush(lv_display_t *disp, const char *device)
+{
+    struct fb_fix_screeninfo fix;
+    int fd = open(device, O_RDWR);
+    if (fd < 0) return;
+    if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) < 0 || fix.line_length == 0) {
+        close(fd);
+        return;
+    }
+    s_flush_fd = fd;
+    s_fb_line_length = fix.line_length;
+    lv_display_set_flush_cb(disp, pwrite_flush_cb);
+}
+
 void init_freambuffer_disp()
 {
     static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -163,7 +207,12 @@ void init_freambuffer_disp()
     printf("Using framebuffer device: %s\n", device);
     wait_for_fbdev(device, 60, 50);
     lv_linux_fbdev_set_file(disp, device);
+    use_pwrite_flush(disp, device);
     panel_resync(device);
+    /* LVGL writes the frame with write() (LV_LINUX_FBDEV_MMAP=n), which goes through fb_write and
+     * reports the exact damage range; the mmap memcpy path never pushes anything here because this
+     * driver's deferred IO does not see those page faults. force_refresh would push the whole frame
+     * on every flush, which is what made the UI laggy. */
     if(0)
         lv_linux_fbdev_set_force_refresh(disp, true);
 
