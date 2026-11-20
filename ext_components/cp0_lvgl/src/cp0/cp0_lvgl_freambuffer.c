@@ -7,6 +7,9 @@
 #include "hal_lvgl_bsp.h"
 #include "lvgl/lvgl.h"
 #include "commount.h"
+#include <errno.h>
+#include <stdbool.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +47,25 @@ static int find_st7789v_fbdev(char *dev_path, size_t buf_size)
 
     snprintf(dev_path, buf_size, "/dev/fb0");
     return 0;
+}
+
+/* The panel's device node exists before udev has given it its group/mode, and the launcher runs as a
+ * user, so the first open can fail with EACCES and LVGL then falls back to a dummy 800x480 display.
+ * Wait until it is openable (todo #25). */
+static bool wait_for_fbdev(const char *dev, int tries, int interval_ms)
+{
+    for (int i = 0; i < tries; ++i) {
+        int fd = open(dev, O_RDWR);
+        if (fd >= 0) {
+            close(fd);
+            return true;
+        }
+        if (i == 0)
+            fprintf(stderr, "[BOOT] %s not openable yet: %s\n", dev, strerror(errno));
+        usleep(interval_ms * 1000);
+    }
+    fprintf(stderr, "[BOOT] %s still not openable after %d ms\n", dev, tries * interval_ms);
+    return false;
 }
 
 void init_freambuffer_disp()
@@ -109,6 +131,7 @@ void init_freambuffer_disp()
     setenv("APPLAUNCH_LINUX_FBDEV_DEVICE", device, 1);
     setenv("LV_LINUX_FBDEV_DEVICE", device, 1);
     printf("Using framebuffer device: %s\n", device);
+    wait_for_fbdev(device, 60, 50);
     lv_linux_fbdev_set_file(disp, device);
     if(0)
         lv_linux_fbdev_set_force_refresh(disp, true);

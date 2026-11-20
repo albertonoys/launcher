@@ -592,17 +592,25 @@ extern "C" void init_wifi(void)
 {
     static std::once_flag initialized;
     std::call_once(initialized, []() {
-        auto wifi = std::make_shared<WifiSystem>();
         WifiRuntime &runtime = wifi_runtime();
+        // The WifiSystem constructor talks to NetworkManager over D-Bus and blocks for ~0.5 s while
+        // NM is still activating at boot, which sat on the path to the first frame. Build it on the
+        // first Wi-Fi API call instead (docs/boot.md).
         if (!runtime.registration.replace(
                 cp0_signal_wifi_api,
-                [wifi](std::list<std::string> arg,
-                       std::function<void(int, std::string)> callback) {
+                [](std::list<std::string> arg,
+                   std::function<void(int, std::string)> callback) {
+                    WifiRuntime &rt = wifi_runtime();
+                    std::shared_ptr<WifiSystem> wifi;
+                    {
+                        std::lock_guard<std::mutex> lock(rt.mutex);
+                        if (!rt.service)
+                            rt.service = std::make_shared<WifiSystem>();
+                        wifi = rt.service;
+                    }
                     wifi->api_call(std::move(arg), std::move(callback));
                 }))
             return;
-        std::lock_guard<std::mutex> lock(runtime.mutex);
-        runtime.service = std::move(wifi);
     });
 }
 

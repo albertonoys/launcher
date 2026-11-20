@@ -72,6 +72,11 @@ private:
     {
         std::atomic<bool> alive{true};
         std::atomic<bool> pending{false};
+        // The audio backend runs the completion callback on its own thread, and LVGL must not be
+        // touched from there (lv_async_call corrupts its timer list; todo #25). The callback leaves
+        // the result here and the retry timer, which runs on the LVGL thread, consumes it.
+        std::atomic<bool> result_ready{false};
+        std::atomic<int> result_code{0};
     };
 
     struct StartupSoundResultContext

@@ -129,19 +129,13 @@ void UILaunchPage::play_startup_sound_with_retry()
 
     std::weak_ptr<StartupSoundAsyncState> weak_state = state;
     try {
-        cp0_signal_audio_api({"SystemSoundPlay", "0"}, [page = this, weak_state](int code, std::string) {
+        // Called on the audio backend's thread: no LVGL here (todo #25).
+        cp0_signal_audio_api({"SystemSoundPlay", "0"}, [weak_state](int code, std::string) {
             auto state = weak_state.lock();
             if (!state || !state->alive.load()) return;
-            auto *context = new (std::nothrow) StartupSoundResultContext{
-                page, weak_state, code};
-            if (!context) {
-                state->pending.store(false);
-                return;
-            }
-            if (lv_async_call(startup_sound_result_async, context) != LV_RESULT_OK) {
-                state->pending.store(false);
-                delete context;
-            }
+            state->result_code.store(code);
+            state->result_ready.store(true);
+            state->pending.store(false);
         });
     } catch (...) {
         handle_startup_sound_result(-1);
@@ -260,7 +254,14 @@ void UILaunchPage::startup_sound_timer_cb(lv_timer_t *timer) noexcept
             !launcher_startup_timer_is_current(timer, self->startup_sound_timer_))
             return;
 
-        if (self->startup_sound_state_->pending.load()) return;
+        StartupSoundAsyncState &state = *self->startup_sound_state_;
+        if (state.result_ready.exchange(false)) {
+            // Consume what the audio thread left behind, then either stop (success) or retry.
+            self->handle_startup_sound_result(state.result_code.load());
+            if (!self->startup_sound_timer_ || state.pending.load()) return;
+        } else if (state.pending.load()) {
+            return;
+        }
 
         ++self->startup_sound_retry_count_;
         if (self->startup_sound_retry_count_ > kStartupSoundRetryMax) {

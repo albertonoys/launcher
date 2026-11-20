@@ -18,6 +18,7 @@
 #include <cerrno>
 #include <condition_variable>
 #include <cstdio>
+#include <ctime>
 #include <mutex>
 #if !defined(__APPLE__)
 #include <semaphore.h>
@@ -167,6 +168,11 @@ int cp0_lvgl_run(Cp0LvglRunOptions options)
         semaphore_ready = true;
     }
 
+    if (getenv("CP0_INIT_TIMING")) {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        fprintf(stderr, "[init] @%ld.%03ld runner\n", (long)t.tv_sec, t.tv_nsec / 1000000);
+    }
     lv_init();
     lv_timer_handler_set_resume_cb(resume_cb, nullptr);
     bool cleaned_up = false;

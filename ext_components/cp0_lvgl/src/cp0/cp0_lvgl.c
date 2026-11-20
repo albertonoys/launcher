@@ -10,6 +10,9 @@
 #include "cp0_lvgl.h"
 #include "../cp0_init_plan.h"
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 static uint64_t enabled_features(void)
 {
@@ -69,6 +72,37 @@ static uint64_t enabled_features(void)
     features |= CP0_INIT_FEATURE_SOUNDCARD;
 #endif
     return features;
+}
+
+
+/* Boot-time attribution (docs/boot.md): CP0_INIT_TIMING=1 logs each init step's duration. */
+static const char *step_name(cp0_init_step_t step)
+{
+    switch (step) {
+    case CP0_INIT_STEP_ENV: return "env";
+    case CP0_INIT_STEP_EVENT: return "event";
+    case CP0_INIT_STEP_FILESYSTEM: return "filesystem";
+    case CP0_INIT_STEP_CONFIG: return "config";
+    case CP0_INIT_STEP_PTY: return "pty";
+    case CP0_INIT_STEP_DISPLAY: return "display";
+    case CP0_INIT_STEP_INPUT: return "input";
+    case CP0_INIT_STEP_RPC: return "rpc";
+    case CP0_INIT_STEP_AUDIO: return "audio";
+    case CP0_INIT_STEP_PROCESS: return "process";
+    case CP0_INIT_STEP_SUDO: return "sudo";
+    case CP0_INIT_STEP_OSINFO: return "osinfo";
+    case CP0_INIT_STEP_SCREENSHOT: return "screenshot";
+    case CP0_INIT_STEP_LORA: return "lora";
+    case CP0_INIT_STEP_WIFI: return "wifi";
+    case CP0_INIT_STEP_BLUETOOTH: return "bluetooth";
+    case CP0_INIT_STEP_SETTINGS: return "settings";
+    case CP0_INIT_STEP_BQ27220: return "bq27220";
+    case CP0_INIT_STEP_SAVED_SETTINGS: return "saved-settings";
+    case CP0_INIT_STEP_BATTERY: return "battery";
+    case CP0_INIT_STEP_CAMERA: return "camera";
+    case CP0_INIT_STEP_SOUNDCARD: return "soundcard";
+    }
+    return "?";
 }
 
 static int run_init_step(cp0_init_step_t step)
@@ -182,11 +216,34 @@ void cp0_lvgl_init(void)
     const size_t step_count = cp0_build_init_plan(enabled_features(), plan,
         sizeof(plan) / sizeof(plan[0]));
 
+    const int timing = getenv("CP0_INIT_TIMING") != NULL;
+    struct timespec t_all0, t_all1;
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &t_all0);
+        fprintf(stderr, "[init] %zu steps, timing on\n", step_count);
+    }
+
     pthread_mutex_lock(&mutex);
     while (next_step < step_count) {
-        if (!run_init_step(plan[next_step]))
+        struct timespec t0, t1;
+        if (timing) clock_gettime(CLOCK_MONOTONIC, &t0);
+        const int ok = run_init_step(plan[next_step]);
+        if (timing) {
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            fprintf(stderr, "[init] %-16s %7.1f ms\n", step_name(plan[next_step]),
+                (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1e6);
+            fflush(stderr);
+        }
+        if (!ok)
             break;
         ++next_step;
     }
     pthread_mutex_unlock(&mutex);
+
+    if (timing) {
+        clock_gettime(CLOCK_MONOTONIC, &t_all1);
+        fprintf(stderr, "[init] all steps %.1f ms\n",
+            (t_all1.tv_sec - t_all0.tv_sec) * 1000.0 + (t_all1.tv_nsec - t_all0.tv_nsec) / 1e6);
+        fflush(stderr);
+    }
 }
