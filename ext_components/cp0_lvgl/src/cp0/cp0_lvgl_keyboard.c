@@ -24,6 +24,8 @@
 #include <sys/timerfd.h>
 #include <linux/input.h>
 #include <libinput.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
 #else
@@ -579,6 +581,32 @@ static void kbd_wake_up(struct kbd_ctx *kc) {
 /* ============================================================
  *  Thread main loop
  * ============================================================ */
+/* libinput refuses ("Invalid path") any device udev has not processed yet, and udev reaches the
+ * keypad ~1.5 s after the launcher starts (it is loaded early now, the udev queue is not). Without
+ * this the launcher ran with no keyboard at all: no navigation, and no way to wake the screensaver. */
+static bool udev_knows_device(const char *path)
+{
+    struct stat st;
+    char db[64];
+    if (!path || stat(path, &st) != 0) return false;
+    snprintf(db, sizeof(db), "/run/udev/data/c%u:%u",
+             (unsigned)major(st.st_rdev), (unsigned)minor(st.st_rdev));
+    return access(db, F_OK) == 0;
+}
+
+static struct libinput_device *add_keyboard_device(struct libinput *li, const char *path)
+{
+    for (int attempt = 0; attempt < 60; ++attempt) {
+        if (attempt)
+            usleep(150 * 1000);
+        if (!udev_knows_device(path))
+            continue;
+        struct libinput_device *dev = libinput_path_add_device(li, path);
+        if (dev) return dev;
+    }
+    return NULL;
+}
+
 void *keyboard_read_thread(void *argv) {
     char *device_path_arg = argv ? (char *)argv : NULL;
     const char *device_path = device_path_arg ? device_path_arg
@@ -592,9 +620,9 @@ void *keyboard_read_thread(void *argv) {
     kc.li = libinput_path_create_context(&interface, NULL);
     if (!kc.li) { fprintf(stderr, "failed to create libinput context\n"); goto out; }
 
-    kc.dev = libinput_path_add_device(kc.li, device_path);
+    kc.dev = add_keyboard_device(kc.li, device_path);
     if (!kc.dev) {
-        fprintf(stderr, "Failed to add device %s (root permissions may be required)\n", device_path);
+        fprintf(stderr, "Failed to add device %s after 9 s (root permissions may be required)\n", device_path);
         goto out;
     }
     if (!libinput_device_has_capability(kc.dev, LIBINPUT_DEVICE_CAP_KEYBOARD)) {
