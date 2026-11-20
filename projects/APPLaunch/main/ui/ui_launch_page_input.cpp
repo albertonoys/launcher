@@ -132,6 +132,27 @@ void UILaunchPage::handle_home_key(lv_event_t *event)
     }
 }
 
+constexpr uint32_t kListEnterHoldMs = 500;
+
+void UILaunchPage::stop_list_enter_hold()
+{
+    if (list_enter_timer_) lv_timer_delete(list_enter_timer_);
+    list_enter_timer_ = nullptr;
+}
+
+void UILaunchPage::list_enter_hold_cb(lv_timer_t *timer) noexcept
+{
+    auto *self = static_cast<UILaunchPage *>(lv_timer_get_user_data(timer));
+    if (!self) return;
+    try {
+        self->stop_list_enter_hold();
+        self->list_enter_swallow_ = true;
+        audio_play_switch();
+        self->open_list_menu();
+    } catch (...) {
+    }
+}
+
 // Keys are owned by the Tab menu while it is open: nothing reaches the list or launches an app.
 // Closing happens on press (Esc/Tab), picking on Enter release, so the matching release does nothing.
 void UILaunchPage::handle_list_menu_key(const struct key_item *elm, uint32_t code)
@@ -157,6 +178,10 @@ void UILaunchPage::handle_list_menu_key(const struct key_item *elm, uint32_t cod
 
 void UILaunchPage::handle_list_key(const struct key_item *elm, uint32_t code)
 {
+    if (code == KEY_ENTER && !elm->key_state && list_enter_swallow_) {
+        list_enter_swallow_ = false;
+        return;
+    }
     if (list_menu_) {
         list_tab_armed_ = false;
         handle_list_menu_key(elm, code);
@@ -180,13 +205,21 @@ void UILaunchPage::handle_list_key(const struct key_item *elm, uint32_t code)
         return;
     }
     if (elm->key_state) list_tab_armed_ = false;  // Tab chorded with another key
-    if (!elm->key_state) {
-        if (code == KEY_ENTER) {
+    if (code == KEY_ENTER) {
+        // A tap launches on release; holding it opens the Tab menu (list_enter_hold_cb).
+        if (elm->key_state == KBD_KEY_PRESSED) {
+            stop_list_enter_hold();
+            list_enter_swallow_ = false;
+            list_enter_timer_ = lv_timer_create(list_enter_hold_cb, kListEnterHoldMs, this);
+        } else if (!elm->key_state) {
+            stop_list_enter_hold();
             audio_play_enter();
             launch_selected_app();
         }
         return;
     }
+    if (elm->key_state) stop_list_enter_hold();  // another key while Enter is down: no menu
+    if (!elm->key_state) return;
 
     bool changed = false;
     switch (code) {

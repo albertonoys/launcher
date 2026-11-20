@@ -78,7 +78,7 @@ private:
         static constexpr int kNoResult = INT_MIN;
     };
 
-    enum class ListMenuAction { Favorite, Delete, ConfirmDelete, Cancel };
+    enum class ListMenuAction { Favorite, Hide, Delete, ConfirmDelete, Cancel };
     struct DeleteJob;
     void create_app_container(lv_obj_t *parent);
     void switch_left();
@@ -107,6 +107,8 @@ private:
     void update_list_menu();
     void activate_list_menu(ListMenuAction action);
     bool toggle_selected_favorite();
+    void hide_selected_app();
+    void stop_list_enter_hold();
     void place_list_cards(int offset);
     void stop_list_anim();
     void start_list_anim(int dir);
@@ -137,6 +139,7 @@ private:
     static void on_root_deleted(lv_event_t *event) noexcept;
     static void startup_sound_timer_cb(lv_timer_t *timer) noexcept;
     static void startup_delay_timer_cb(lv_timer_t *timer) noexcept;
+    static void list_enter_hold_cb(lv_timer_t *timer) noexcept;
 
     Launch *launch_ = nullptr;
     lv_obj_t *startup_gif_ = nullptr;
@@ -167,6 +170,8 @@ private:
     std::string delete_name_;
     bool list_tab_armed_ = false;  // Tab went down with the menu closed and nothing else since
     uint32_t list_tab_down_tick_ = 0;
+    lv_timer_t *list_enter_timer_ = nullptr;  // Enter is down: opens the Tab menu if still held
+    bool list_enter_swallow_ = false;  // the hold opened the menu; its Enter release must not act
     lv_timer_t *startup_sound_timer_ = nullptr;
     lv_timer_t *startup_delay_timer_ = nullptr;
     StartupTimerContext *startup_sound_context_ = nullptr;

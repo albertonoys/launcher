@@ -12,6 +12,8 @@
 #include "launcher_platform.hpp"
 #include "model/launcher_list_model.hpp"
 #include "model/launcher_uninstall_model.hpp"
+#include "app_registry.h"
+#include "settings/settings_launcher_model.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -53,6 +55,23 @@ void style_list_row(lv_obj_t *row, bool selected)
     const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
     lv_obj_set_style_bg_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, selector);
     lv_obj_set_style_text_color(row, lv_color_hex(selected ? 0xFFFFFF : 0x888888), selector);
+}
+
+// The app's Settings > Launcher entry, if it has one: the same filter that page uses to list it.
+bool hideable_descriptor(const app &item, AppDescriptor &out)
+{
+    std::size_t count = 0;
+    const AppDescriptor *entries = launcher_app_registry_entries(&count);
+    for (std::size_t i = 0; entries && i < count; ++i) {
+        const AppDescriptor &d = entries[i];
+        if (d.configurable && d.label && item.Name == d.label && d.config_key && d.config_key[0] &&
+            settings_t12b::launcher::is_launcher_settings_origin(d.origin) &&
+            !settings_t12b::launcher::is_protected_launcher_app(d.config_key)) {
+            out = d;
+            return true;
+        }
+    }
+    return false;
 }
 
 // Built-in pages have no Exec, so they are keyed by name.
@@ -154,6 +173,8 @@ void UILaunchPage::forget_list_view()
     list_menu_rows_.clear();
     list_menu_items_.clear();
     list_tab_armed_ = false;
+    stop_list_enter_hold();
+    list_enter_swallow_ = false;
     list_container_ = nullptr;
     list_rows_.fill(nullptr);
     list_cards_.fill(nullptr);
@@ -377,7 +398,11 @@ void UILaunchPage::open_list_menu()
     if (!item) return;
     list_menu_exec_ = favorite_key(*item);
     std::vector<ListMenuAction> items = {ListMenuAction::Favorite};
-    if (!item->StoreDesktopPath.empty()) items.push_back(ListMenuAction::Delete);
+    AppDescriptor descriptor{};
+    if (!item->StoreDesktopPath.empty())
+        items.push_back(ListMenuAction::Delete);
+    else if (hideable_descriptor(*item, descriptor))
+        items.push_back(ListMenuAction::Hide);
     items.push_back(ListMenuAction::Cancel);
     show_list_menu("", std::move(items), 0);
 }
@@ -456,6 +481,7 @@ void UILaunchPage::update_list_menu()
         const char *text = "Cancel";
         switch (list_menu_items_[i]) {
         case ListMenuAction::Favorite: text = favorite ? "Remove from favorites" : "Add to favorites"; break;
+        case ListMenuAction::Hide: text = "Hide"; break;
         case ListMenuAction::Delete:
         case ListMenuAction::ConfirmDelete: text = "Delete"; break;
         case ListMenuAction::Cancel: break;
@@ -482,6 +508,7 @@ void UILaunchPage::activate_list_menu(ListMenuAction action)
     }
     close_list_menu();
     if (action == ListMenuAction::Favorite) toggle_selected_favorite();
+    if (action == ListMenuAction::Hide) hide_selected_app();
 }
 
 // Uninstall through the App Store backend so its records stay right (never run for stock apps):
@@ -678,6 +705,27 @@ void UILaunchPage::finish_list_delete(const std::string &exec, bool ok, const st
             (void)write_favorites(previous, launcher_favorites_join(launcher_favorites_toggle(favorites, exec)));
     }
     launcher_toast().show(message.c_str());
+}
+
+// What Settings > Launcher's toggle does: disable the app in the registry, then reload the app list.
+void UILaunchPage::hide_selected_app()
+{
+    if (!launch_ || list_pos_ >= list_order_.size()) return;
+    const app *item = launch_->app_at(list_order_[list_pos_]);
+    AppDescriptor descriptor{};
+    if (!item || !hideable_descriptor(*item, descriptor)) return;
+    const std::string name = item->Name;  // the reload below replaces the app list
+    bool hidden = false;
+    try {
+        hidden = launcher_app_registry_set_enabled(descriptor, false);
+    } catch (...) {
+    }
+    if (!hidden) {
+        launcher_toast().show("Unable to hide the app");
+        return;
+    }
+    launcher_app_registry_notify_changed();
+    launcher_toast().show((name + " hidden (Settings > Launcher)").c_str());
 }
 
 // Flip the favorite flag of the selected app; the order is rebuilt and the same app stays selected.
