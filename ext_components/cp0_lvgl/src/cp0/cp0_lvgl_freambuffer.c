@@ -70,17 +70,21 @@ static bool wait_for_fbdev(const char *dev, int tries, int interval_ms)
     return false;
 }
 
-/* This driver's deferred IO never reports the page faults of LVGL's framebuffer mmap on this panel,
- * so a frame written with memcpy is never pushed to the glass: only full repaints (fbcon, a
- * blank/unblank cycle, a write()) ever arrive. Write the flushed rows with pwrite() instead - fb_write
- * reports the exact damage range, so the panel follows the UI and only the dirty area is sent over
- * SPI. force_refresh would push the whole frame on every flush and makes the UI lag. (todo #36) */
+/* Frames do not reach this panel as individual dirty rows: writing the framebuffer row by row makes
+ * rows go missing (a full repaint left only the top bar on the glass) because the panel driver's SPI
+ * push loses rows when new damage arrives while a transfer is in flight. So keep a shadow of the whole
+ * frame, copy every flush into it, and push the whole frame once per frame, on LVGL's last flush. That
+ * is one complete transfer per frame, the same shape as the full-frame write() that does work here.
+ * (The driver's deferred IO never reports LVGL's mmap write faults, which is why the flush cannot be
+ * left to LVGL; and the lvgl component is prebuilt, so LV_LINUX_FBDEV_MMAP=0 is not available.) */
 static int s_flush_fd = -1;
+static uint8_t *s_shadow = NULL;
+static size_t s_fb_size = 0;
 static uint32_t s_fb_line_length = 0;
 
-static void pwrite_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p)
+static void shadow_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p)
 {
-    if (s_flush_fd < 0 || s_fb_line_length == 0) {
+    if (s_flush_fd < 0 || !s_shadow || s_fb_line_length == 0) {
         lv_display_flush_ready(disp);
         return;
     }
@@ -89,27 +93,41 @@ static void pwrite_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *
     const int32_t w = lv_area_get_width(area);
     const size_t row_bytes = (size_t)w * px_size;
     const uint32_t src_stride = lv_draw_buf_width_to_stride(w, cf);
-    off_t pos = (off_t)area->y1 * s_fb_line_length + (off_t)area->x1 * px_size;
+    size_t pos = (size_t)area->y1 * s_fb_line_length + (size_t)area->x1 * px_size;
     for (int32_t y = area->y1; y <= area->y2; ++y) {
-        (void)!pwrite(s_flush_fd, color_p, row_bytes, pos);
+        memcpy(s_shadow + pos, color_p, row_bytes);
         color_p += src_stride;
         pos += s_fb_line_length;
     }
+    if (lv_display_flush_is_last(disp))
+        (void)!pwrite(s_flush_fd, s_shadow, s_fb_size, 0);
     lv_display_flush_ready(disp);
 }
 
-static void use_pwrite_flush(lv_display_t *disp, const char *device)
+static void use_shadow_flush(lv_display_t *disp, const char *device)
 {
     struct fb_fix_screeninfo fix;
+    struct fb_var_screeninfo var;
     int fd = open(device, O_RDWR);
     if (fd < 0) return;
-    if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) < 0 || fix.line_length == 0) {
+    if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) < 0 || ioctl(fd, FBIOGET_VSCREENINFO, &var) < 0 ||
+        fix.line_length == 0 || var.yres == 0) {
         close(fd);
         return;
     }
+    const size_t size = (size_t)fix.line_length * var.yres;
+    uint8_t *shadow = (uint8_t *)malloc(size);
+    if (!shadow) {
+        close(fd);
+        return;
+    }
+    /* start from what is on screen now (the boot text) so untouched areas stay correct */
+    (void)!pread(fd, shadow, size, 0);
     s_flush_fd = fd;
+    s_shadow = shadow;
+    s_fb_size = size;
     s_fb_line_length = fix.line_length;
-    lv_display_set_flush_cb(disp, pwrite_flush_cb);
+    lv_display_set_flush_cb(disp, shadow_flush_cb);
 }
 
 void init_freambuffer_disp()
@@ -177,7 +195,7 @@ void init_freambuffer_disp()
     printf("Using framebuffer device: %s\n", device);
     wait_for_fbdev(device, 60, 50);
     lv_linux_fbdev_set_file(disp, device);
-    use_pwrite_flush(disp, device);
+    use_shadow_flush(disp, device);
     /* LVGL writes the frame with write() (LV_LINUX_FBDEV_MMAP=n), which goes through fb_write and
      * reports the exact damage range; the mmap memcpy path never pushes anything here because this
      * driver's deferred IO does not see those page faults. force_refresh would push the whole frame
