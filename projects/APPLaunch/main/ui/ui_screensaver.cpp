@@ -269,12 +269,8 @@ void release_screen_off_backlight() noexcept
         launcher_media_controls::restore_backlight(raw);
     } catch (...) {
     }
-    /* Power is back. Force the cycle rather than just writing 0: if the suspend
-     * write did not happen (or the attribute was not writable), the panel is
-     * blanked from a previous cycle and writing the same value does nothing,
-     * and the init sequence only runs on the off -> on transition. */
-    panel_blank(true);
-    usleep(20 * 1000);
+    /* Power is back: let DRM run the panel's init sequence, then throw away
+     * whatever the display thinks it already shows. */
     panel_blank(false);
     try {
         if (lv_obj_t *screen = lv_screen_active())
