@@ -53,8 +53,14 @@ class Cp0SystemSoundPlayer::Impl
 {
 public:
     Impl()
-        : worker_(&Impl::worker_loop, this)
     {
+        /* Start the worker only after every member is constructed. Starting it from
+         * the member initializer list means it runs while cache_, context_, engine_,
+         * sounds_ and sound_initialized_ (declared after worker_) are still being
+         * constructed: its first decode_cache() then resizes vectors that the
+         * constructors overwrite straight afterwards, and it aborts on the next
+         * index (`status=6/ABRT` at boot, todo #37). */
+        worker_ = std::thread(&Impl::worker_loop, this);
     }
 
     ~Impl()
