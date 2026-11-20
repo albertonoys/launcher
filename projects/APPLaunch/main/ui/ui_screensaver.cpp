@@ -248,14 +248,15 @@ static void panel_blank(bool blank) noexcept
 void suspend_screen_off_backlight() noexcept
 {
     if (s_screen_off_backlight_raw >= 0) return;
-    /* Only the backlight: blanking the panel here leaves it latched off across a
-     * reboot (nothing at probe time clears it), so every boot started black. The
-     * wake does the off -> on cycle instead. */
+    /* Stop the panel while it still has power, then cut it. */
+    panel_blank(true);
     try {
         s_screen_off_backlight_raw = launcher_media_controls::suspend_backlight();
     } catch (...) {
         s_screen_off_backlight_raw = -1;
     }
+    if (s_screen_off_backlight_raw < 0)
+        panel_blank(false);
 }
 
 void release_screen_off_backlight() noexcept
