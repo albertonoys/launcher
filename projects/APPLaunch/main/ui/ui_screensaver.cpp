@@ -215,42 +215,9 @@ void update_timer_period()
     lv_timer_set_period(s_timer, s_model.hold_pending() ? kHoldPollMs : kIdleCheckMs);
 }
 
-/* The backlight node carries a power-supply regulator (DT: /backlight, regulator
- * "backlight-regulator", regulator-boot-on), so writing brightness 0 cuts the
- * panel's power. The panel comes back uninitialised: it keeps the old image or a
- * black one and ignores new frames until its init sequence runs again, and that
- * only happens on a DRM unblank. Blank with the panel and unblank after the
- * power is back, so every wake re-initialises it. Both writes go to the sysfs
- * attribute, which zero-setup.sh leaves writable by group video; if they fail
- * the launcher keeps working exactly as before. */
-static void panel_blank(bool blank) noexcept
-{
-    const char *device = getenv("APPLAUNCH_LINUX_FBDEV_DEVICE");
-    char name[32] = "fb0";
-    if (device && device[0]) {
-        char target[32] = {0};
-        const char *base = std::strrchr(device, '/');
-        base = base ? base + 1 : device;
-        if (readlink(device, target, sizeof(target) - 1) > 0)
-            std::snprintf(name, sizeof(name), "%s", target);
-        else if (std::strncmp(base, "fb", 2) == 0)
-            std::snprintf(name, sizeof(name), "%s", base);
-    }
-    char path[96];
-    std::snprintf(path, sizeof(path), "/sys/class/graphics/%s/blank", name);
-    const int fd = open(path, O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return;
-    const char value = blank ? '1' : '0';
-    (void)!write(fd, &value, 1);
-    close(fd);
-}
-
 void suspend_screen_off_backlight() noexcept
 {
     if (s_screen_off_backlight_raw >= 0) return;
-    /* Only the backlight: blanking the panel here leaves it latched off across a
-     * reboot (nothing at probe time clears it), so every boot started black. The
-     * wake does the off -> on cycle instead. */
     try {
         s_screen_off_backlight_raw = launcher_media_controls::suspend_backlight();
     } catch (...) {
@@ -266,20 +233,6 @@ void release_screen_off_backlight() noexcept
     s_screen_off_backlight_raw = -1;
     try {
         launcher_media_controls::restore_backlight(raw);
-    } catch (...) {
-    }
-    /* Power is back. Force the cycle rather than just writing 0: if the suspend
-     * write did not happen (or the attribute was not writable), the panel is
-     * blanked from a previous cycle and writing the same value does nothing,
-     * and the init sequence only runs on the off -> on transition. */
-    panel_blank(true);
-    usleep(20 * 1000);
-    panel_blank(false);
-    try {
-        if (lv_obj_t *screen = lv_screen_active())
-            lv_obj_invalidate(screen);
-        if (lv_obj_t *top = lv_layer_top())
-            lv_obj_invalidate(top);
     } catch (...) {
     }
 }
