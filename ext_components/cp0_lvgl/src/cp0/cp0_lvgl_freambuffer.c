@@ -68,6 +68,36 @@ static bool wait_for_fbdev(const char *dev, int tries, int interval_ms)
     return false;
 }
 
+/* The backlight node's power-supply regulator powers the panel, so a session that ended with the screen
+ * off (or with the panel blanked) can leave it latched blank: the DRM probe re-runs the panel's init but
+ * a plain FBIOBLANK(UNBLANK) on an already-unblanked fb is a no-op, so the panel stays black while the
+ * launcher draws into the framebuffer. Force one off -> on cycle once the fb is open, before the first
+ * frame (todo #36). */
+static void panel_resync(const char *device)
+{
+    char name[32] = "fb0";
+    char target[32] = {0};
+    const char *base = strrchr(device, '/');
+    base = base ? base + 1 : device;
+    if (readlink(device, target, sizeof(target) - 1) > 0)
+        snprintf(name, sizeof(name), "%s", target);
+    else if (strncmp(base, "fb", 2) == 0)
+        snprintf(name, sizeof(name), "%s", base);
+
+    char path[96];
+    snprintf(path, sizeof(path), "/sys/class/graphics/%s/blank", name);
+    for (int pass = 0; pass < 2; ++pass) {
+        int fd = open(path, O_WRONLY | O_CLOEXEC);
+        if (fd < 0)
+            return;
+        const char value = pass == 0 ? '1' : '0';
+        (void)!write(fd, &value, 1);
+        close(fd);
+        if (pass == 0)
+            usleep(20 * 1000);
+    }
+}
+
 void init_freambuffer_disp()
 {
     static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -133,6 +163,7 @@ void init_freambuffer_disp()
     printf("Using framebuffer device: %s\n", device);
     wait_for_fbdev(device, 60, 50);
     lv_linux_fbdev_set_file(disp, device);
+    panel_resync(device);
     if(0)
         lv_linux_fbdev_set_force_refresh(disp, true);
 
