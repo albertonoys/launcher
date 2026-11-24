@@ -212,14 +212,23 @@ void UILaunchPage::rebuild_list_order()
 {
     list_names_.clear();
     list_favorite_.clear();
+    std::vector<long long> installed;
+    int sort = 0;
+    try {
+        cp0_signal_config_api({"GetInt", kHomeListSortConfigKey, "0"},
+                              [&](int code, std::string data) { if (code == 0 && data == "1") sort = 1; });
+    } catch (...) {
+    }
+    list_sort_recent_ = sort == 1;
     const std::vector<std::string> favorites = launcher_favorites_parse(read_favorites());
     const size_t count = launch_ ? launch_->app_count() : 0;
     for (size_t i = 0; i < count; ++i) {
         const app *item = launch_->app_at(i);
         list_names_.push_back(item ? item->Name : std::string());
         list_favorite_.push_back(item && std::find(favorites.begin(), favorites.end(), favorite_key(*item)) != favorites.end());
+        if (list_sort_recent_) installed.push_back(item ? item->InstallTime : 0);
     }
-    list_order_ = launcher_list_order(list_names_, list_favorite_);
+    list_order_ = launcher_list_order(list_names_, list_favorite_, installed);
     const size_t selected = launch_ ? launch_->current_app_index() : 0;
     auto found = std::find(list_order_.begin(), list_order_.end(), selected);
     list_pos_ = found == list_order_.end() ? 0 : static_cast<size_t>(found - list_order_.begin());
@@ -386,7 +395,7 @@ bool UILaunchPage::list_cycle_favorite()
     return true;
 }
 
-// Tab menu. Items are rebuilt per open and per step (actions -> delete confirmation -> deleting).
+// Held-Enter menu. Items are rebuilt per open and per step (actions -> delete confirmation -> deleting).
 void UILaunchPage::open_list_menu()
 {
     if (list_menu_ || !launch_ || !list_container_ || list_order_.empty()) return;
@@ -405,6 +414,30 @@ void UILaunchPage::open_list_menu()
         items.push_back(ListMenuAction::Hide);
     items.push_back(ListMenuAction::Cancel);
     show_list_menu("", std::move(items), 0);
+}
+
+// Short Tab: how the non-favorites are ordered. The current order is preselected.
+void UILaunchPage::open_sort_menu()
+{
+    if (list_menu_ || !list_container_) return;
+    show_list_menu("Sort apps", {ListMenuAction::SortAlphabetical, ListMenuAction::SortRecent},
+                   list_sort_recent_ ? 1 : 0);
+}
+
+void UILaunchPage::set_list_sort(bool recent)
+{
+    if (recent == list_sort_recent_) return;
+    const char *previous = list_sort_recent_ ? "1" : "0";
+    if (!config_call({"SetInt", kHomeListSortConfigKey, recent ? "1" : "0"})) {
+        launcher_toast().show("Unable to save sorting");
+        return;
+    }
+    if (!config_call({"Save"})) {  // SetInt is live at once: undo it
+        if (config_call({"SetInt", kHomeListSortConfigKey, previous})) (void)config_call({"Save"});
+        launcher_toast().show("Unable to save sorting");
+        return;
+    }
+    refresh_list_view();  // keeps the selected app selected
 }
 
 // Replaces the menu box; list_menu_exec_ survives. A non-empty title adds an unselectable first row.
@@ -485,6 +518,8 @@ void UILaunchPage::update_list_menu()
         case ListMenuAction::Delete:
         case ListMenuAction::ConfirmDelete: text = "Delete"; break;
         case ListMenuAction::Cancel: break;
+        case ListMenuAction::SortAlphabetical: text = "A-Z"; break;
+        case ListMenuAction::SortRecent: text = "Recently installed"; break;
         }
         lv_label_set_text(list_menu_rows_[i], text);
         style_list_row(list_menu_rows_[i], i == list_menu_sel_);
@@ -509,6 +544,8 @@ void UILaunchPage::activate_list_menu(ListMenuAction action)
     close_list_menu();
     if (action == ListMenuAction::Favorite) toggle_selected_favorite();
     if (action == ListMenuAction::Hide) hide_selected_app();
+    if (action == ListMenuAction::SortAlphabetical || action == ListMenuAction::SortRecent)
+        set_list_sort(action == ListMenuAction::SortRecent);
 }
 
 // Uninstall through the App Store backend so its records stay right (never run for stock apps):

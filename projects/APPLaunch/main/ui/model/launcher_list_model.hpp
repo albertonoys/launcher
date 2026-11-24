@@ -15,8 +15,11 @@ std::vector<size_t> launcher_alphabetical_order(const std::vector<std::string> &
 
 // Like launcher_alphabetical_order, but favorites (favorite[i] != 0) come first; both groups A-Z.
 // A shorter `favorite` counts as "not a favorite" for the missing entries.
+// With `installed` (install times, per name), the non-favorites go newest first instead,
+// equal times A-Z; a shorter `installed` counts as time 0 (oldest).
 std::vector<size_t> launcher_list_order(const std::vector<std::string> &names,
-                                        const std::vector<char> &favorite);
+                                        const std::vector<char> &favorite,
+                                        const std::vector<long long> &installed = {});
 
 // Stored favorites (config `home_favorites`) are Exec strings joined by '\n'.
 std::vector<std::string> launcher_favorites_parse(const std::string &stored);
@@ -41,4 +44,6 @@ int launcher_favorite_next(size_t position, size_t favorites);
 // Defined in settings/settings_adapter.cpp, next to the Settings toggle.
 constexpr const char *kHomeFavoritesConfigKey = "home_favorites";
 constexpr const char *kHomeListViewConfigKey = "home_list_view";
+// Launcher config int: 0 = non-favorites A-Z (default), 1 = most recently installed first.
+constexpr const char *kHomeListSortConfigKey = "home_list_sort";
 bool launcher_home_list_view_enabled();

@@ -21,15 +21,19 @@ static bool name_less(const std::string &a, const std::string &b)
 }
 
 std::vector<size_t> launcher_list_order(const std::vector<std::string> &names,
-                                        const std::vector<char> &favorite)
+                                        const std::vector<char> &favorite,
+                                        const std::vector<long long> &installed)
 {
     auto is_favorite = [&](size_t i) { return i < favorite.size() && favorite[i] != 0; };
+    auto time = [&](size_t i) { return i < installed.size() ? installed[i] : 0LL; };
     std::vector<size_t> order(names.size());
     for (size_t i = 0; i < order.size(); i++)
         order[i] = i;
     std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
         if (is_favorite(a) != is_favorite(b))
             return is_favorite(a);
+        if (!installed.empty() && !is_favorite(a) && time(a) != time(b))
+            return time(a) > time(b);
         return name_less(names[a], names[b]);
     });
     return order;

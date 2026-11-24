@@ -41,6 +41,7 @@ struct app
     std::string Icon;
     std::string Exec;
     std::string StoreDesktopPath;  // absolute .desktop path; set only for StoreInstalled apps
+    long long InstallTime = 0;     // .desktop last-write time (install/update order); 0 for built-ins
     std::function<void(Launch *)> launch;
 
     app(std::string name, std::string icon, std::string exec, bool terminal);

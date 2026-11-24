@@ -78,7 +78,7 @@ private:
         static constexpr int kNoResult = INT_MIN;
     };
 
-    enum class ListMenuAction { Favorite, Hide, Delete, ConfirmDelete, Cancel };
+    enum class ListMenuAction { Favorite, Hide, Delete, ConfirmDelete, Cancel, SortAlphabetical, SortRecent };
     struct DeleteJob;
     void create_app_container(lv_obj_t *parent);
     void switch_left();
@@ -98,6 +98,8 @@ private:
     bool list_cycle_favorite();
     size_t favorite_count() const;
     void open_list_menu();
+    void open_sort_menu();
+    void set_list_sort(bool recent);
     void show_list_menu(const std::string &title, std::vector<ListMenuAction> items, size_t selected);
     const app *selected_store_app() const;
     void begin_list_delete();
@@ -149,13 +151,14 @@ private:
     static constexpr size_t kListRows = 6;
     lv_obj_t *list_container_ = nullptr;
     std::array<lv_obj_t *, kListRows> list_rows_ = {};
-    // Vertical carousel: A-Z neighbours -2..+2 of the selection, centre card is index 2.
+    // Vertical carousel: list neighbours -2..+2 of the selection, centre card is index 2.
     static constexpr size_t kListCards = 5;
     std::array<lv_obj_t *, kListCards> list_cards_ = {};
     lv_obj_t *list_scroll_ = nullptr;
     std::vector<std::string> list_names_;
     std::vector<char> list_favorite_;  // per Launch::app_list index
-    std::vector<size_t> list_order_;  // A-Z position -> index in Launch::app_list
+    std::vector<size_t> list_order_;  // list position -> index in Launch::app_list
+    bool list_sort_recent_ = false;   // config home_list_sort, read per rebuild
     size_t list_pos_ = 0;
     size_t list_top_ = 0;
     bool list_mode_ = false;

@@ -52,6 +52,10 @@ int main()
     assert((launcher_list_order(n3, {}) == launcher_alphabetical_order(n3)));
     assert(launcher_list_order({}, {1}).empty());
 
+    // recent: favorites stay A-Z on top, the rest newest first, equal times A-Z
+    assert((launcher_list_order(n3, {0, 0, 0, 1, 1}, {5, 7, 5, 1, 9}) == std::vector<size_t>{4, 3, 1, 2, 0}));
+    assert((launcher_list_order(n3, {}, {0, 0, 3}) == std::vector<size_t>{2, 4, 1, 3, 0}));  // short times are oldest
+
     // stored favorites
     assert(launcher_favorites_parse("").empty());
     assert((launcher_favorites_parse("\n/a b\n\n/c\n") == std::vector<std::string>{"/a b", "/c"}));

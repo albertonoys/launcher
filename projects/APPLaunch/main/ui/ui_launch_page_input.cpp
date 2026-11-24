@@ -199,7 +199,7 @@ void UILaunchPage::handle_list_key(const struct key_item *elm, uint32_t code)
             list_tab_armed_ = false;
             if (short_press) {
                 audio_play_switch();
-                open_list_menu();
+                open_sort_menu();
             }
         }
         return;

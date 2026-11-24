@@ -244,6 +244,8 @@ void launcher_append_desktop_apps(std::list<app> &apps)
 
             apps.emplace_back(candidate.entry.name, candidate.icon_path, candidate.entry.exec,
                               candidate.entry.terminal, candidate.entry.sysplause);
+            if (candidate.has_modified_time)
+                apps.back().InstallTime = static_cast<long long>(candidate.modified_time);
             if (origin == LauncherAppOrigin::StoreInstalled)
                 apps.back().StoreDesktopPath = app_dir + "/" + candidate.filename;
             ++appended;
