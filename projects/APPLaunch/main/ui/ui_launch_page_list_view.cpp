@@ -30,7 +30,7 @@ constexpr lv_coord_t kRowHeight = 24;
 constexpr lv_coord_t kRowsWidth = 190;
 constexpr lv_coord_t kCenterCard = 100;   // same sizes as the carousel, so the icon pool fits
 constexpr lv_coord_t kSideCard = 80;
-constexpr lv_coord_t kCardPitch = 99;     // centre-to-centre, as in the horizontal carousel
+constexpr lv_coord_t kCardPitch = 80;     // centre-to-centre: about 20 px between the icons, a third of each neighbour shows
 constexpr lv_coord_t kCardX = 100;        // from the container centre: card centre at x=260
 constexpr int32_t kListAnimMs = 150;
 
@@ -355,7 +355,7 @@ void UILaunchPage::update_list_view()
     }
 }
 
-// Card i sits at slot i-2 (pitch 99); offset slides all of them, sizes follow the distance from the centre.
+// Card i sits at slot i-2 (kCardPitch apart); offset slides all of them, sizes follow the distance from the centre.
 void UILaunchPage::place_list_cards(int offset)
 {
     const auto selector = LV_PART_MAIN | LV_STATE_DEFAULT;
