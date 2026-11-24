@@ -347,7 +347,7 @@ void AppTopBarTitleComponent::on_create(lv_obj_t *obj)
     lv_obj_set_size(label_, LV_PCT(100), LV_PCT(100));
     lv_label_set_long_mode(label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(label_, lv_color_hex(0xCCAA00), 0);
-    lv_obj_set_style_text_font(label_, cp0_fonts().fallback(14), 0);
+    lv_obj_set_style_text_font(label_, cp0_fonts().status(14), 0);
     lv_obj_set_style_text_align(label_, LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_text(label_, title_.c_str());
 }
@@ -393,7 +393,7 @@ lv_obj_t *create_centered_status_label(lv_obj_t *obj)
     if (!label) return nullptr;
     lv_obj_center(label);
     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(label, LV_FONT_DEFAULT, 0);
+    lv_obj_set_style_text_font(label, cp0_fonts().status(14), 0);
     lv_label_set_text(label, "--");
     return label;
 }

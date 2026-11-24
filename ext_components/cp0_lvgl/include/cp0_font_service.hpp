@@ -38,7 +38,8 @@ public:
     Cp0FontService(const Cp0FontService &) = delete;
     Cp0FontService &operator=(const Cp0FontService &) = delete;
 
-    enum class GlyphRange { All, LatinExtendedA };
+    // Text: below U+2000, so symbols, arrows and CJK fall through to the fallback.
+    enum class GlyphRange { All, LatinExtendedA, Text };
 
     // The optional glyph fallback must stay alive until release().
     lv_font_t *get(const char *font_name, uint16_t size,
@@ -52,7 +53,20 @@ public:
     lv_font_t *fallback(uint16_t size) const;
     void release();
 
+    // Launcher setting, applied before any font is created: family ("dejavu",
+    // "terminus", "tamzen", "spleen", "greybeard", "ark", "cozette", "proggy",
+    // "departure", "scientifica"; "" keeps them) replaces the UI sans fonts,
+    // and sharp draws them 1-bit instead of anti-aliased.
+    void set_ui_font(std::string family, bool sharp);
+    // Status bar text: the built-in bitmap font unless a UI font family was set.
+    lv_font_t *status(uint16_t size);
+
 private:
+    std::string ui_family_;
+    bool ui_sharp_ = false;
+    lv_font_t *get_cached(const char *font_name, uint16_t size, lv_freetype_font_style_t style,
+                          lv_freetype_font_render_mode_t render_mode,
+                          const lv_font_t *glyph_fallback, GlyphRange glyph_range);
 #if LV_USE_FREETYPE
     using GlyphCallback = decltype(lv_font_t::get_glyph_dsc);
     struct CachedFont

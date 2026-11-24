@@ -6,6 +6,7 @@
 
 #include "settings_page.hpp"
 
+#include "../launcher_ui_font.hpp"
 #include "cp0_lvgl_app.h"
 #include "hal_lvgl_bsp.h"
 #include "settings_adb_guide_page.hpp"
@@ -578,6 +579,27 @@ void bluetooth_named_only_api(int cmd, void *data)
     bluetooth_named_only_state = previous;
 }
 
+/* Settings -> Screen -> Font: one switch per family, the saved one shows on. */
+SettingApiCallBackFunc ui_font_api(std::string family)
+{
+    return [family](int cmd, void *data) {
+        const bool on = launcher_ui_font::family() == family;
+        if (cmd == SettingApiReadFlag && data) *static_cast<bool *>(data) = on;
+        else if (cmd == SettingApiReadFlagTimeStart && data)
+            std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = on;
+        else if (cmd == SettingApiActivate) (void)launcher_ui_font::set_family(family);
+    };
+}
+
+void ui_font_sharp_api(int cmd, void *data)
+{
+    const bool on = launcher_ui_font::sharp();
+    if (cmd == SettingApiReadFlag && data) *static_cast<bool *>(data) = on;
+    else if (cmd == SettingApiReadFlagTimeStart && data)
+        std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = on;
+    else if (cmd == SettingApiActivate) (void)launcher_ui_font::set_sharp(!on);
+}
+
 static void append_numeric_options(Tree &tree, const NodeIter &parent, int first, int last)
 {
     for (int value = first; value <= last; ++value) tree.append_child(parent, SettingEntry{std::to_string(value)});
@@ -621,6 +643,18 @@ void UISettingTreePage::create_page_detail()
             mode_tree.append_child(dark_time, SettingEntry{"60S"});
             mode_tree.append_child(dark_time, SettingEntry{"300S"});
         }
+        {
+            NodeIter font = mode_tree.append_child(screen, SettingEntry{"Font", roller_page_factory});
+            for (const auto &[label, family] : {std::pair<const char *, const char *>{"Default", ""},
+                                                {"DejaVu Sans", "dejavu"}, {"Terminus", "terminus"},
+                                                {"Tamzen", "tamzen"}, {"Spleen", "spleen"},
+                                                {"Greybeard", "greybeard"}, {"Ark Pixel", "ark"},
+                                                {"Cozette", "cozette"}, {"ProggyClean", "proggy"},
+                                                {"Departure Mono", "departure"},
+                                                {"Scientifica", "scientifica"}})
+                mode_tree.append_child(font, SettingEntry{label, ui_font_api(family), true});
+        }
+        mode_tree.append_child(screen, SettingEntry{"Sharp text", SettingApiCallBackFunc(ui_font_sharp_api), true});
     }
 
     {

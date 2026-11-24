@@ -11,6 +11,8 @@
 #include "hal_lvgl_bsp.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <iterator>
 #include <utility>
 
 extern "C" {
@@ -42,7 +44,78 @@ lv_font_t *montserrat_with_latin()
     return &font;
 }
 
+const auto kRenderMono = static_cast<lv_freetype_font_render_mode_t>(2);
+
+bool is_ui_font(const std::string &name)
+{
+    return name == "AlibabaPuHuiTi-3-55-Regular.ttf" || name == "DejaVuSans.ttf" ||
+           name == "Montserrat-Bold.ttf";
+}
+
+struct UiFace
+{
+    const char *file;
+    uint16_t size;            // 0: any size
+    const char *bold = nullptr; // a drawn bold, used instead of FreeType's synthetic one
+};
+
+#define GREYBEARD(px) {"Greybeard-" #px "px.ttf", px, "Greybeard-" #px "px-Bold.ttf"}
+
+// Pixel fonts are only sharp at their native sizes, so a size snaps to the nearest one.
+const UiFace *ui_font_face(const std::string &family, uint16_t size)
+{
+    static const UiFace dejavu[] = {{"DejaVuSans.ttf", 0}};
+    static const UiFace terminus[] = {
+        {"TerminusTTF-4.49.3.ttf", 12}, {"TerminusTTF-4.49.3.ttf", 14},
+        {"TerminusTTF-4.49.3.ttf", 16}, {"TerminusTTF-4.49.3.ttf", 18},
+        {"TerminusTTF-4.49.3.ttf", 20}, {"TerminusTTF-4.49.3.ttf", 22},
+        {"TerminusTTF-4.49.3.ttf", 24}};
+    static const UiFace tamzen[] = {
+        {"Tamzen5x9r.ttf", 9}, {"Tamzen6x12r.ttf", 12}, {"Tamzen7x13r.ttf", 13},
+        {"Tamzen7x14r.ttf", 14}, {"Tamzen8x15r.ttf", 15}, {"Tamzen8x16r.ttf", 16},
+        {"Tamzen10x20r.ttf", 20}};
+    static const UiFace spleen[] = {
+        {"spleen-6x12.otf", 12}, {"spleen-8x16.otf", 16}, {"spleen-12x24.otf", 24}};
+    static const UiFace greybeard[] = {
+        GREYBEARD(11), GREYBEARD(12), GREYBEARD(13), GREYBEARD(14), GREYBEARD(15),
+        GREYBEARD(16), GREYBEARD(17), GREYBEARD(18), GREYBEARD(22)};
+    static const UiFace ark[] = {{"ark-pixel-12px-proportional-latin.ttf", 12},
+                                 {"ark-pixel-12px-proportional-latin.ttf", 24}};
+    static const UiFace cozette[] = {{"CozetteVector.ttf", 13}, {"CozetteVector.ttf", 26}};
+    static const UiFace proggy[] = {{"ProggyClean.ttf", 16}};
+    static const UiFace departure[] = {{"DepartureMono-Regular.otf", 11}};
+    static const UiFace scientifica[] = {{"scientifica.ttf", 11, "scientificaBold.ttf"},
+                                         {"scientifica.ttf", 22, "scientificaBold.ttf"}};
+
+    const UiFace *begin = nullptr, *end = nullptr;
+#define UI_FAMILY(name) if (family == #name) begin = std::begin(name), end = std::end(name);
+    UI_FAMILY(dejavu) UI_FAMILY(terminus) UI_FAMILY(tamzen) UI_FAMILY(spleen)
+    UI_FAMILY(greybeard) UI_FAMILY(ark) UI_FAMILY(cozette) UI_FAMILY(proggy)
+    UI_FAMILY(departure) UI_FAMILY(scientifica)
+#undef UI_FAMILY
+    if (!begin) return nullptr;
+
+    const UiFace *best = begin;
+    for (const UiFace *face = begin; face != end; ++face) {
+        if (std::abs(face->size - size) < std::abs(best->size - size)) best = face;
+    }
+    return best;
+}
+
+#undef GREYBEARD
+
 } // namespace
+
+void Cp0FontService::set_ui_font(std::string family, bool sharp)
+{
+    ui_family_ = std::move(family);
+    ui_sharp_ = sharp;
+}
+
+lv_font_t *Cp0FontService::status(uint16_t size)
+{
+    return ui_family_.empty() ? fallback(size) : get("DejaVuSans.ttf", size);
+}
 
 Cp0FontService::~Cp0FontService()
 {
@@ -55,6 +128,43 @@ lv_font_t *Cp0FontService::get(const char *font_name, uint16_t size,
                                const lv_font_t *glyph_fallback, GlyphRange glyph_range)
 {
 #if LV_USE_FREETYPE
+    if (font_name && is_ui_font(font_name)) {
+        const bool sharp = ui_sharp_ && render_mode == LV_FREETYPE_FONT_RENDER_MODE_BITMAP &&
+                           glyph_range == GlyphRange::All;
+        lv_font_t *font = nullptr;
+        if (sharp) {
+            // 1-bit only for text: symbols such as the favorite star break up without anti-aliasing.
+            lv_font_t *smooth = get_cached(font_name, size, style, render_mode, glyph_fallback, glyph_range);
+            font = get_cached(font_name, size, style, kRenderMono, smooth, GlyphRange::Text);
+            if (font == fallback(size)) font = smooth;
+        } else {
+            font = get_cached(font_name, size, style, render_mode, glyph_fallback, glyph_range);
+        }
+        const UiFace *face = glyph_range == GlyphRange::All ? ui_font_face(ui_family_, size) : nullptr;
+        if (!face || std::string(face->file) == font_name) return font;
+        const uint16_t ui_size = face->size ? face->size : size;
+        const char *ui_file = face->file;
+        auto ui_style = style;
+        const bool bold = (style & LV_FREETYPE_FONT_STYLE_BOLD) || std::string(font_name) == "Montserrat-Bold.ttf";
+        if (bold && face->bold) {
+            ui_file = face->bold;
+            ui_style = static_cast<lv_freetype_font_style_t>(style & ~LV_FREETYPE_FONT_STYLE_BOLD);
+        }
+        // The original font stays behind it for glyphs it lacks (CJK, symbols).
+        lv_font_t *ui_font = sharp ? get_cached(ui_file, ui_size, ui_style, kRenderMono, font, GlyphRange::Text)
+                                   : get_cached(ui_file, ui_size, ui_style, render_mode, font, glyph_range);
+        return ui_font == fallback(ui_size) ? font : ui_font;
+    }
+#endif
+    return get_cached(font_name, size, style, render_mode, glyph_fallback, glyph_range);
+}
+
+#if LV_USE_FREETYPE
+lv_font_t *Cp0FontService::get_cached(const char *font_name, uint16_t size,
+                                      lv_freetype_font_style_t style,
+                                      lv_freetype_font_render_mode_t render_mode,
+                                      const lv_font_t *glyph_fallback, GlyphRange glyph_range)
+{
     std::lock_guard<std::mutex> lock(mutex_);
     const std::string path = resolve_path(font_name);
     if (path.empty()) return fallback(size);
@@ -68,12 +178,21 @@ lv_font_t *Cp0FontService::get(const char *font_name, uint16_t size,
     if (glyph_fallback) set_glyph_fallback(*font, *glyph_fallback);
     try {
         auto entry = fonts_.emplace(font_key, CachedFont{font, font->get_glyph_dsc}).first;
-        if (glyph_range == GlyphRange::LatinExtendedA) {
+        if (glyph_range != GlyphRange::All) {
             // The cached callback's address stays valid across rehashes.
             font->user_data = &entry->second.get_glyph_dsc;
+        }
+        if (glyph_range == GlyphRange::LatinExtendedA) {
             font->get_glyph_dsc = [](const lv_font_t *face, lv_font_glyph_dsc_t *dsc,
                                      uint32_t letter, uint32_t next) {
                 if (letter < 0x0100 || letter > 0x017F) return false;
+                const auto get_glyph_dsc = *static_cast<const GlyphCallback *>(face->user_data);
+                return get_glyph_dsc(face, dsc, letter, next);
+            };
+        } else if (glyph_range == GlyphRange::Text) {
+            font->get_glyph_dsc = [](const lv_font_t *face, lv_font_glyph_dsc_t *dsc,
+                                     uint32_t letter, uint32_t next) {
+                if (letter >= 0x2000) return false;
                 const auto get_glyph_dsc = *static_cast<const GlyphCallback *>(face->user_data);
                 return get_glyph_dsc(face, dsc, letter, next);
             };
@@ -83,15 +202,15 @@ lv_font_t *Cp0FontService::get(const char *font_name, uint16_t size,
         return fallback(size);
     }
     return font;
-#else
-    (void)font_name;
-    (void)style;
-    (void)render_mode;
-    (void)glyph_fallback;
-    (void)glyph_range;
-    return fallback(size);
-#endif
 }
+#else
+lv_font_t *Cp0FontService::get_cached(const char *, uint16_t size, lv_freetype_font_style_t,
+                                      lv_freetype_font_render_mode_t, const lv_font_t *,
+                                      GlyphRange)
+{
+    return fallback(size);
+}
+#endif
 
 lv_font_t *Cp0FontService::get_mono(const char *font_name, uint16_t size,
                                     lv_freetype_font_style_t style)
@@ -124,7 +243,9 @@ std::string Cp0FontService::key(const std::string &path, uint16_t size,
            std::to_string(static_cast<int>(style)) + "#" +
            std::to_string(static_cast<int>(render_mode)) + "#" +
            std::to_string(reinterpret_cast<std::uintptr_t>(glyph_fallback)) +
-           (glyph_range == GlyphRange::LatinExtendedA ? "#latin-extended-a" : "");
+           (glyph_range == GlyphRange::LatinExtendedA ? "#latin-extended-a"
+            : glyph_range == GlyphRange::Text        ? "#text"
+                                                      : "");
 }
 #endif
 
