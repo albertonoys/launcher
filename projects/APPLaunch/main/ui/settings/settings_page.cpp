@@ -29,6 +29,7 @@
 #include "settings_wifi_page.hpp"
 #include "settings_tree_types.hpp"
 #include "settings_extport.hpp"
+#include "../model/lockscreen_state_model.hpp"
 #include "../model/setup_value_policy.hpp"
 
 #include <atomic>
@@ -415,7 +416,7 @@ bool write_bluetooth_named_only_config(int value)
     return succeeded;
 }
 
-bool save_bluetooth_config()
+bool save_config()
 {
     bool succeeded = false;
     try {
@@ -567,7 +568,7 @@ void bluetooth_named_only_api(int cmd, void *data)
         bluetooth_named_only_state = previous;
         return;
     }
-    if (save_bluetooth_config()) {
+    if (save_config()) {
         bluetooth_named_only_state = desired;
         return;
     }
@@ -575,8 +576,40 @@ void bluetooth_named_only_api(int cmd, void *data)
     // SetInt mutates the live config immediately. Restore it when Save fails
     // so a later page rebuild cannot observe an unpersisted value.
     if (write_bluetooth_named_only_config(previous ? 1 : 0))
-        (void)save_bluetooth_config();
+        (void)save_config();
     bluetooth_named_only_state = previous;
+}
+
+/* On: waking from the black screen needs TAB then ENTER.  Off: any key wakes. */
+void screen_lock_api(int cmd, void *data)
+{
+    bool enabled = true;
+    try {
+        cp0_signal_config_api({"GetInt", kLockScreenConfigKey, "1"},
+                              [&](int code, std::string value) { enabled = !(code == 0 && value == "0"); });
+    } catch (...) {
+    }
+    if ((cmd == SettingApiReadFlag || cmd == SettingApiReadFlagTimeStart) && data) {
+        if (cmd == SettingApiReadFlag)
+            *static_cast<bool *>(data) = enabled;
+        else
+            std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = enabled;
+        return;
+    }
+    if (cmd != SettingApiActivate) return;
+
+    auto write = [](bool value) {
+        bool succeeded = false;
+        try {
+            cp0_signal_config_api({"SetInt", kLockScreenConfigKey, value ? "1" : "0"},
+                                  [&](int code, std::string) { succeeded = code == 0; });
+        } catch (...) {
+        }
+        return succeeded;
+    };
+    if (!write(!enabled)) return;
+    // SetInt changes the live config at once; put it back when Save fails.
+    if (!save_config()) (void)write(enabled);
 }
 
 /* Settings -> Screen -> Font: one switch per family, the saved one shows on. */
@@ -643,6 +676,7 @@ void UISettingTreePage::create_page_detail()
             mode_tree.append_child(dark_time, SettingEntry{"60S"});
             mode_tree.append_child(dark_time, SettingEntry{"300S"});
         }
+        mode_tree.append_child(screen, SettingEntry{"Lock", screen_lock_api, true});
         {
             NodeIter font = mode_tree.append_child(screen, SettingEntry{"Font", roller_page_factory});
             for (const auto &[label, family] : {std::pair<const char *, const char *>{"Default", ""},

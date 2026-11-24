@@ -145,4 +145,14 @@ int main()
     press(model, KEY_ESC, UINT32_MAX - 5);
     assert(!model.poll(4).sleep);
     assert(model.poll(9994).sleep);
+
+    // With the gesture off, any fresh press from black unlocks straight away;
+    // repeats and releases still do nothing.
+    model.reset(300000);
+    model.set_unlock_gesture(false);
+    assert(!model.handle_key(KEY_SPACE, false, false, 300001).unlock);
+    assert(!model.handle_key(KEY_SPACE, false, true, 300002).unlock);
+    decision = press(model, KEY_SPACE, 300003);
+    assert(decision.consumed && decision.unlock);
+    assert(!decision.show_panel && !decision.sleep && !decision.blocked);
 }
