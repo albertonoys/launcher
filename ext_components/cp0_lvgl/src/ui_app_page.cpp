@@ -11,7 +11,57 @@
 #include "cp0_status_lifecycle.hpp"
 #include "cp0_status_component_contract.hpp"
 
+#include <algorithm>
+
 namespace {
+
+constexpr int kStatusBarHeight = 20;
+
+// Rows of a line of the status font that the digit '0' inks. Read from the rendered glyph, because
+// bitmap fonts such as Terminus report their whole character cell as the glyph box.
+void status_ink(const lv_font_t *font, int &top, int &height)
+{
+    top = 0;
+    height = lv_font_get_line_height(font);
+    lv_font_glyph_dsc_t glyph{};
+    if (!lv_font_get_glyph_dsc(font, &glyph, '0', 0) || !glyph.box_h) return;
+    const int box_top = lv_font_get_line_height(font) - font->base_line - glyph.ofs_y - glyph.box_h;
+    top = box_top;
+    height = glyph.box_h;
+    // Smooth glyphs come as alpha bitmaps, 1-bit (Sharp text) ones as images; both decode to a draw buffer.
+    if (glyph.format <= LV_FONT_GLYPH_FORMAT_NONE || glyph.format > LV_FONT_GLYPH_FORMAT_IMAGE) return;
+    lv_draw_buf_t *buf = lv_draw_buf_create(glyph.box_w, glyph.box_h, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO);
+    if (!buf) return;
+    const auto *bitmap = static_cast<const lv_draw_buf_t *>(lv_font_get_glyph_bitmap(&glyph, buf));
+    int first = -1, last = -1;
+    const bool argb = bitmap && bitmap->header.cf == LV_COLOR_FORMAT_ARGB8888;
+    if (bitmap && (argb || bitmap->header.cf == LV_COLOR_FORMAT_A8)) {
+        const int step = argb ? 4 : 1, alpha = argb ? 3 : 0;
+        for (int y = 0; y < static_cast<int>(bitmap->header.h); ++y) {
+            const uint8_t *row = bitmap->data + y * bitmap->header.stride;
+            for (int x = 0; x < static_cast<int>(bitmap->header.w); ++x) {
+                if (row[x * step + alpha] <= 127) continue;
+                if (first < 0) first = y;
+                last = y;
+                break;
+            }
+        }
+    }
+    lv_font_glyph_release_draw_data(&glyph);
+    lv_draw_buf_destroy(buf);
+    if (first < 0) return;
+    top = box_top + first;
+    height = last - first + 1;
+}
+
+// y of a label inside a status component of parent_height (centred in the bar) that centres the
+// digits' ink on the bar.
+int status_label_y(const lv_font_t *font, int parent_height)
+{
+    int top = 0, height = 0;
+    status_ink(font, top, height);
+    return (kStatusBarHeight - height) / 2 - top - (kStatusBarHeight - parent_height) / 2;
+}
 
 lv_obj_t *release_fallback_screen = nullptr;
 lv_display_t *release_fallback_display = nullptr;
@@ -344,10 +394,12 @@ void AppTopBarTitleComponent::on_create(lv_obj_t *obj)
     label_ = lv_label_create(obj);
     if (!label_) return;
     lv_obj_add_event_cb(label_, child_delete_cb, LV_EVENT_DELETE, this);
-    lv_obj_set_size(label_, LV_PCT(100), LV_PCT(100));
+    const lv_font_t *font = cp0_fonts().status(14);
+    lv_obj_set_size(label_, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_y(label_, status_label_y(font, lv_obj_get_style_height(obj, LV_PART_MAIN)));
     lv_label_set_long_mode(label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(label_, lv_color_hex(0xCCAA00), 0);
-    lv_obj_set_style_text_font(label_, cp0_fonts().status(14), 0);
+    lv_obj_set_style_text_font(label_, font, 0);
     lv_obj_set_style_text_align(label_, LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_text(label_, title_.c_str());
 }
@@ -378,11 +430,11 @@ bool AppTopBarTitleComponent::resources_ready() const
 
 namespace {
 
-void configure_status_component(lv_obj_t *obj, const lv_image_dsc_t *background)
+// Plain text on the bar: the coloured pill images behind the clock and battery were dropped.
+void configure_status_component(lv_obj_t *obj)
 {
     lv_obj_set_style_radius(obj, 0, 0);
     lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_image_src(obj, background, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     lv_obj_set_style_pad_all(obj, 0, 0);
 }
@@ -391,9 +443,10 @@ lv_obj_t *create_centered_status_label(lv_obj_t *obj)
 {
     lv_obj_t *label = lv_label_create(obj);
     if (!label) return nullptr;
-    lv_obj_center(label);
+    const lv_font_t *font = cp0_fonts().status(14);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, status_label_y(font, lv_obj_get_style_height(obj, LV_PART_MAIN)));
     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(label, cp0_fonts().status(14), 0);
+    lv_obj_set_style_text_font(label, font, 0);
     lv_label_set_text(label, "--");
     return label;
 }
@@ -412,7 +465,7 @@ AppTopBarTimeComponent::~AppTopBarTimeComponent()
 
 void AppTopBarTimeComponent::on_create(lv_obj_t *obj)
 {
-    configure_status_component(obj, &cp0_status_time_background);
+    configure_status_component(obj);
     label_ = create_centered_status_label(obj);
     if (label_)
         lv_obj_add_event_cb(label_, child_delete_cb, LV_EVENT_DELETE, this);
@@ -457,7 +510,7 @@ AppTopBarBatteryComponent::~AppTopBarBatteryComponent()
 
 void AppTopBarBatteryComponent::on_create(lv_obj_t *obj)
 {
-    configure_status_component(obj, &cp0_status_battery_background);
+    configure_status_component(obj);
 
     battery_bar_ = lv_bar_create(obj);
     if (!battery_bar_) return;
@@ -621,7 +674,7 @@ AppTopBarNetworkComponent::~AppTopBarNetworkComponent()
 void AppTopBarNetworkComponent::on_create(lv_obj_t *obj)
 {
     lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+    lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(obj, 4, 0);
 
@@ -630,19 +683,28 @@ void AppTopBarNetworkComponent::on_create(lv_obj_t *obj)
     lv_obj_add_event_cb(ethernet_image_, child_delete_cb, LV_EVENT_DELETE, this);
     lv_image_set_src(ethernet_image_, &cp0_status_ethernet);
 
-    static constexpr int HEIGHTS[] = {6, 9, 12, 15};
+    // As tall as the clock's digits and centred like them, so the bars line up with the text.
+    int ink_top = 0, ink = 0;
+    status_ink(cp0_fonts().status(14), ink_top, ink);
+    const int height = lv_obj_get_style_height(obj, LV_PART_MAIN);
+    const int panel_height = std::clamp(ink, 8, height);
     wifi_panel_ = lv_obj_create(obj);
     if (!wifi_panel_) return;
     lv_obj_add_event_cb(wifi_panel_, child_delete_cb, LV_EVENT_DELETE, this);
     lv_obj_remove_style_all(wifi_panel_);
-    lv_obj_set_size(wifi_panel_, 22, 15);
+    lv_obj_set_size(wifi_panel_, 22, panel_height);
+    // Flex centres it in this component; shift it to the bar's centre, where the digits are.
+    lv_obj_set_style_translate_y(wifi_panel_,
+                                 (kStatusBarHeight - panel_height) / 2 - (kStatusBarHeight - height) / 2 -
+                                     (height - panel_height) / 2, 0);
     for (int index = 0; index < 4; ++index) {
         wifi_bars_[index] = lv_obj_create(wifi_panel_);
         if (!wifi_bars_[index]) return;
         lv_obj_add_event_cb(wifi_bars_[index], child_delete_cb, LV_EVENT_DELETE, this);
-        lv_obj_set_size(wifi_bars_[index], 4, HEIGHTS[index]);
-        lv_obj_set_pos(wifi_bars_[index], index * 6, 15 - HEIGHTS[index]);
-        lv_obj_set_style_radius(wifi_bars_[index], 2, 0);
+        const int bar_height = (panel_height * (index + 1) + 2) / 4;
+        lv_obj_set_size(wifi_bars_[index], 4, bar_height);
+        lv_obj_set_pos(wifi_bars_[index], index * 6, panel_height - bar_height);
+        lv_obj_set_style_radius(wifi_bars_[index], 0, 0);  // square: rounded 4 px bars anti-alias into a blur
         lv_obj_set_style_bg_color(wifi_bars_[index], lv_color_hex(0x4D4D4D), 0);
         lv_obj_set_style_border_width(wifi_bars_[index], 0, 0);
         lv_obj_clear_flag(wifi_bars_[index], LV_OBJ_FLAG_SCROLLABLE);
