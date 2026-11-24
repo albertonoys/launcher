@@ -7,6 +7,7 @@
 #include "../main/ui/model/launcher_list_model.hpp"
 
 #include <cassert>
+#include <climits>
 
 int main()
 {
@@ -54,7 +55,10 @@ int main()
 
     // recent: favorites stay A-Z on top, the rest newest first, equal times A-Z
     assert((launcher_list_order(n3, {0, 0, 0, 1, 1}, {5, 7, 5, 1, 9}) == std::vector<size_t>{4, 3, 1, 2, 0}));
-    assert((launcher_list_order(n3, {}, {0, 0, 3}) == std::vector<size_t>{2, 4, 1, 3, 0}));  // short times are oldest
+    assert((launcher_list_order(n3, {}, {0, 0, 3}) == std::vector<size_t>{2, 1, 0, 4, 3}));  // short times are oldest
+    // real file times can be negative (libstdc++ file clock); a missing time is still the oldest
+    assert((launcher_list_order({"Built", "Old", "New"}, {}, {LLONG_MIN, -900, -100}) == std::vector<size_t>{2, 1, 0}));
+    assert((launcher_list_order({"Old", "Built"}, {}, {-900}) == std::vector<size_t>{0, 1}));
 
     // stored favorites
     assert(launcher_favorites_parse("").empty());

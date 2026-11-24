@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 
 static char lower(char c)
 {
@@ -25,7 +26,7 @@ std::vector<size_t> launcher_list_order(const std::vector<std::string> &names,
                                         const std::vector<long long> &installed)
 {
     auto is_favorite = [&](size_t i) { return i < favorite.size() && favorite[i] != 0; };
-    auto time = [&](size_t i) { return i < installed.size() ? installed[i] : 0LL; };
+    auto time = [&](size_t i) { return i < installed.size() ? installed[i] : std::numeric_limits<long long>::min(); };
     std::vector<size_t> order(names.size());
     for (size_t i = 0; i < order.size(); i++)
         order[i] = i;

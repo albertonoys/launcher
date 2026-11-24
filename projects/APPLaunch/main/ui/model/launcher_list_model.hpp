@@ -16,7 +16,7 @@ std::vector<size_t> launcher_alphabetical_order(const std::vector<std::string> &
 // Like launcher_alphabetical_order, but favorites (favorite[i] != 0) come first; both groups A-Z.
 // A shorter `favorite` counts as "not a favorite" for the missing entries.
 // With `installed` (install times, per name), the non-favorites go newest first instead,
-// equal times A-Z; a shorter `installed` counts as time 0 (oldest).
+// equal times A-Z; a shorter `installed` counts as the oldest (any value, negatives included, is newer).
 std::vector<size_t> launcher_list_order(const std::vector<std::string> &names,
                                         const std::vector<char> &favorite,
                                         const std::vector<long long> &installed = {});
