@@ -16,7 +16,6 @@
 
 #include <cstddef>
 #include <functional>
-#include <limits>
 #include <list>
 #include <memory>
 #include <stdexcept>
@@ -42,9 +41,7 @@ struct app
     std::string Icon;
     std::string Exec;
     std::string StoreDesktopPath;  // absolute .desktop path; set only for StoreInstalled apps
-    // .desktop last-write time, only comparable to other apps' (libstdc++'s file clock counts from
-    // 2174, so real times are negative). Built-ins have none and sort as the oldest.
-    long long InstallTime = std::numeric_limits<long long>::min();
+    std::string DesktopPath;       // absolute .desktop path; empty for built-in pages
     std::function<void(Launch *)> launch;
 
     app(std::string name, std::string icon, std::string exec, bool terminal);

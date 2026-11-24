@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <limits>
+#include <sstream>
 
 static char lower(char c)
 {
@@ -121,4 +122,42 @@ int launcher_favorite_next(size_t position, size_t favorites)
     if (favorites == 0)
         return -1;
     return static_cast<int>(position + 1 < favorites ? position + 1 : 0);
+}
+
+void launcher_dpkg_log_installs(const std::string &log, std::map<std::string, long long> &out)
+{
+    std::istringstream lines(log);
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::istringstream fields(line);
+        std::string date, time, action, package;
+        if (!(fields >> date >> time >> action >> package) || action != "install" ||
+            package.find(':') == std::string::npos)
+            continue;
+        long long stamp = 0;
+        int digits = 0;
+        for (char c : date + time) {
+            if (c >= '0' && c <= '9') {
+                stamp = stamp * 10 + (c - '0');
+                ++digits;
+            }
+        }
+        if (digits == 14) out[package] = stamp;
+    }
+}
+
+std::vector<std::string> launcher_dpkg_list_desktops(const std::string &list, const std::string &dir)
+{
+    std::vector<std::string> found;
+    const std::string prefix = dir + "/";
+    const std::string suffix = ".desktop";
+    std::istringstream lines(list);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.size() > prefix.size() + suffix.size() && line.compare(0, prefix.size(), prefix) == 0 &&
+            line.find('/', prefix.size()) == std::string::npos &&
+            line.compare(line.size() - suffix.size(), suffix.size(), suffix) == 0)
+            found.push_back(line);
+    }
+    return found;
 }

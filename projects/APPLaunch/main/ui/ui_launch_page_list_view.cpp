@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <climits>
+#include <filesystem>
 #include <fstream>
 #include <list>
 #include <sstream>
@@ -109,6 +111,43 @@ bool write_favorites(const std::string &previous, const std::string &desired)
     if (config_call({"Save"})) return true;
     if (config_call({"SetStr", kHomeFavoritesConfigKey, previous})) (void)config_call({"Save"});
     return false;
+}
+
+std::string read_file(const std::string &path)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+// .desktop path -> latest dpkg "install" of its package (upgrades do not count; file times do,
+// since dpkg keeps the build time and replaces the file on upgrade). Rebuilt when dpkg.log changes.
+// shortcut: reads dpkg.log and dpkg.log.1 only; installs rotated into .gz count as oldest.
+const std::map<std::string, long long> &desktop_install_times(const std::string &app_dir)
+{
+    static std::map<std::string, long long> times;
+    static std::filesystem::file_time_type seen{};
+    static std::uintmax_t seen_size = 0;
+    std::error_code error;
+    const std::string log = "/var/log/dpkg.log";
+    const auto modified = std::filesystem::last_write_time(log, error);
+    const std::uintmax_t size = error ? 0 : std::filesystem::file_size(log, error);
+    if (error || (modified == seen && size == seen_size)) return times;
+    seen = modified;
+    seen_size = size;
+
+    std::map<std::string, long long> installs;
+    launcher_dpkg_log_installs(read_file(log + ".1"), installs);
+    launcher_dpkg_log_installs(read_file(log), installs);
+    times.clear();
+    for (const auto &[package, stamp] : installs) {
+        // Multi-arch packages keep pkg:arch.list, the others pkg.list.
+        std::string list = read_file("/var/lib/dpkg/info/" + package + ".list");
+        if (list.empty()) list = read_file("/var/lib/dpkg/info/" + package.substr(0, package.find(':')) + ".list");
+        for (const std::string &desktop : launcher_dpkg_list_desktops(list, app_dir)) times[desktop] = stamp;
+    }
+    return times;
 }
 
 } // namespace
@@ -221,12 +260,17 @@ void UILaunchPage::rebuild_list_order()
     }
     list_sort_recent_ = sort == 1;
     const std::vector<std::string> favorites = launcher_favorites_parse(read_favorites());
+    const std::map<std::string, long long> *times =
+        list_sort_recent_ ? &desktop_install_times(launcher_platform::path("applications")) : nullptr;
     const size_t count = launch_ ? launch_->app_count() : 0;
     for (size_t i = 0; i < count; ++i) {
         const app *item = launch_->app_at(i);
         list_names_.push_back(item ? item->Name : std::string());
         list_favorite_.push_back(item && std::find(favorites.begin(), favorites.end(), favorite_key(*item)) != favorites.end());
-        if (list_sort_recent_) installed.push_back(item ? item->InstallTime : 0);
+        if (times) {
+            auto found = item ? times->find(item->DesktopPath) : times->end();
+            installed.push_back(found == times->end() ? LLONG_MIN : found->second);
+        }
     }
     list_order_ = launcher_list_order(list_names_, list_favorite_, installed);
     const size_t selected = launch_ ? launch_->current_app_index() : 0;

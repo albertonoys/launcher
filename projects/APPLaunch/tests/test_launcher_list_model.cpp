@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <climits>
+#include <map>
 
 int main()
 {
@@ -56,6 +57,28 @@ int main()
     // recent: favorites stay A-Z on top, the rest newest first, equal times A-Z
     assert((launcher_list_order(n3, {0, 0, 0, 1, 1}, {5, 7, 5, 1, 9}) == std::vector<size_t>{4, 3, 1, 2, 0}));
     assert((launcher_list_order(n3, {}, {0, 0, 3}) == std::vector<size_t>{2, 1, 0, 4, 3}));  // short times are oldest
+    // dpkg.log: installs only, latest wins, malformed lines skipped
+    std::map<std::string, long long> installs;
+    launcher_dpkg_log_installs("2026-11-16 16:45:07 startup archives install\n"
+                               "2026-11-21 00:23:23 install meshcore-zero:arm64 <none> 0.1.23\n"
+                               "2026-11-23 12:47:39 upgrade meshcore-zero:arm64 0.1.23 0.1.27\n"
+                               "2026-11-23 12:57:11 install lokicz:arm64 <none> 0.42\n"
+                               "2026-11-24 10:45:19 upgrade lokicz:arm64 0.42 0.43\n"
+                               "garbage\n",
+                               installs);
+    launcher_dpkg_log_installs("2026-11-25 09:00:00 install lokicz:arm64 <none> 0.44\n", installs);
+    assert(installs.size() == 2);
+    assert(installs["meshcore-zero:arm64"] == 20261121002323LL);
+    assert(installs["lokicz:arm64"] == 20261125090000LL);
+
+    // .list: only .desktop files directly in the directory
+    const std::string dir = "/usr/share/APPLaunch/applications";
+    auto desktops = launcher_dpkg_list_desktops("/.\n/usr/share/APPLaunch/applications\n" + dir +
+                                                    "/files.desktop\n" + dir + "/sub/x.desktop\n" + dir +
+                                                    "/readme.txt\n/usr/share/applications/y.desktop\n",
+                                                dir);
+    assert((desktops == std::vector<std::string>{dir + "/files.desktop"}));
+
     // real file times can be negative (libstdc++ file clock); a missing time is still the oldest
     assert((launcher_list_order({"Built", "Old", "New"}, {}, {LLONG_MIN, -900, -100}) == std::vector<size_t>{2, 1, 0}));
     assert((launcher_list_order({"Old", "Built"}, {}, {-900}) == std::vector<size_t>{0, 1}));

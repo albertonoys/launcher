@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,13 @@ std::vector<size_t> launcher_alphabetical_order(const std::vector<std::string> &
 std::vector<size_t> launcher_list_order(const std::vector<std::string> &names,
                                         const std::vector<char> &favorite,
                                         const std::vector<long long> &installed = {});
+
+// Install times from dpkg.log text: "YYYY-MM-DD HH:MM:SS install pkg:arch ..." lines (not
+// upgrades) into out["pkg:arch"] = YYYYMMDDHHMMSS. Later lines win, so feed older logs first;
+// a package removed and installed again counts from its latest install.
+void launcher_dpkg_log_installs(const std::string &log, std::map<std::string, long long> &out);
+// Paths in a dpkg .list file's text that are .desktop files directly inside `dir`.
+std::vector<std::string> launcher_dpkg_list_desktops(const std::string &list, const std::string &dir);
 
 // Stored favorites (config `home_favorites`) are Exec strings joined by '\n'.
 std::vector<std::string> launcher_favorites_parse(const std::string &stored);
