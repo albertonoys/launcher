@@ -33,7 +33,10 @@ SettingsPresentation present_setup_providers(const PagedSelection &selection,
 SettingsPresentation present_providers(const std::vector<ProviderConfig> &providers,
                                        const PagedSelection &selection,
                                        int maximum_rows);
-SettingsPresentation present_provider_detail(const ProviderConfig &provider);
+// The last row is always "Use Provider"; active marks the current Setup provider.
+SettingsPresentation present_provider_detail(const ProviderConfig &provider,
+                                             bool active = false,
+                                             bool confirm_delete = false);
 SettingsPresentation present_setup_progress();
 
 }  // namespace zclaw

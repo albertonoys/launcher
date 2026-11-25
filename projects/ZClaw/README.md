@@ -14,7 +14,7 @@ integration, timeouts, and persistence details.
 - Uses a keyboard-first layout designed for the 320×170 display.
 - Checks internet connectivity before opening the application.
 - Provides first-run Quickstart for OpenAI, OpenRouter, Anthropic, Ollama,
-  DeepSeek, and custom OpenAI-compatible endpoints.
+  DeepSeek, Gemini, Groq, and custom OpenAI-compatible endpoints.
 - Downloads the pinned ZeroClaw `v0.8.2` AArch64 release when the local binary
   is missing, installs/starts its service, creates the selected agent, and
   configures the local gateway on `127.0.0.1:42617`.

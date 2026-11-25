@@ -43,7 +43,7 @@ public:
     void update_setup_error_selection(int selected_index);
     void render_setup_providers();
     void render_providers();
-    void render_provider_detail();
+    void render_provider_detail(bool confirm_delete = false);
     void move_selection(int delta);
     void sync_setup_provider_selection();
 

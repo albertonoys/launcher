@@ -68,6 +68,9 @@ SettingsActivation settings_activation(const SettingsActivationContext &context)
         return {};
     }
     case SettingsView::ProviderDetail:
+        // setup_initialize_row is the panel's last row: "Use Provider" here.
+        if (context.selected_row == context.setup_initialize_row)
+            return {SettingsActivationAction::UseProvider};
         return {SettingsActivationAction::EditProviderField};
     }
     return {};

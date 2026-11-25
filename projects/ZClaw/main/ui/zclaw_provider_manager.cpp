@@ -11,6 +11,7 @@
 #include "zclaw_provider_store.h"
 #include "zclaw_storage.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace zclaw {
@@ -66,6 +67,20 @@ bool ProviderManager::activate(const ProviderConfig &provider, std::string *erro
         return false;
     providers_ = std::move(candidate);
     setup_provider_ = std::move(active);
+    return true;
+}
+
+bool ProviderManager::promote(std::size_t index, std::string *error)
+{
+    if (index >= providers_.size())
+        return false;
+    std::vector<ProviderConfig> candidate = providers_;
+    std::rotate(candidate.begin(), candidate.begin() + static_cast<std::ptrdiff_t>(index),
+                candidate.begin() + static_cast<std::ptrdiff_t>(index) + 1);
+    if (!persist(candidate, error))
+        return false;
+    providers_ = std::move(candidate);
+    setup_provider_ = providers_.front();
     return true;
 }
 

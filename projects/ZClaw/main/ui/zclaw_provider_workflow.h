@@ -35,6 +35,8 @@ private:
     InputDialog &input_;
     FontManager &fonts_;
     ChatView &chat_;
+    // Provider that a first Fn+Del armed for deletion, or -1.
+    int delete_armed_index_ = -1;
 };
 
 }  // namespace zclaw
