@@ -271,6 +271,9 @@ void UILaunchPage::create_screen()
                     [](lv_obj_t *element) { return element != nullptr; });
     if (!complete)
         create_app_container(content_container());
+    if (!list_container_)
+        create_list_view(content_container());
+    apply_home_view();
 }
 
 void UILaunchPage::create_app_container(lv_obj_t *parent)

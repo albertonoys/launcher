@@ -144,6 +144,7 @@ UILaunchPage::~UILaunchPage()
 {
     startup_sound_state_->alive.store(false);
     *carousel_alive_ = false;
+    *delete_alive_ = false;
     navigation_.cancel_navigation();
     if (carousel_container_) {
         lv_obj_remove_event_cb_with_user_data(
@@ -165,6 +166,7 @@ UILaunchPage::~UILaunchPage()
         left_arrow_button_ = nullptr;
         right_arrow_button_ = nullptr;
     }
+    delete_list_view();
     if (home_key_registered_ && root_screen_) {
         lv_obj_remove_event_cb_with_user_data(
             root_screen_, UILaunchPage::on_home_key, this);
@@ -236,6 +238,7 @@ void UILaunchPage::on_root_deleted(lv_event_t *event) noexcept
         self->carousel_container_ = nullptr;
         self->left_arrow_button_ = nullptr;
         self->right_arrow_button_ = nullptr;
+        self->forget_list_view();
         self->home_key_registered_ = false;
         self->navigation_.cancel_navigation();
     } catch (...) {
@@ -252,6 +255,7 @@ void UILaunchPage::on_owned_obj_deleted(lv_event_t *event) noexcept
             self->startup_gif_ == target, self->startup_gif_done_);
         if (self->startup_logo_scr_ == target) self->startup_logo_scr_ = nullptr;
         if (self->startup_gif_ == target) self->startup_gif_ = nullptr;
+        if (self->list_container_ == target) self->forget_list_view();
         bool carousel_object_deleted = self->carousel_container_ == target ||
             self->left_arrow_button_ == target || self->right_arrow_button_ == target;
         for (lv_obj_t *&element : self->carousel_elements_) {
@@ -314,6 +318,7 @@ void UILaunchPage::refresh_carousel()
             update_carousel_slot(slot, "", {});
     }
     launcher_home_animation::apply_title_overflow(label(kCardCenter), true);
+    refresh_list_view();
 }
 
 void UILaunchPage::reload_home_icons(const std::vector<std::string> &icon_paths)
@@ -325,6 +330,8 @@ void UILaunchPage::reload_home_icons(const std::vector<std::string> &icon_paths)
     // Keep the old pool alive until every image widget no longer references it.
     for (size_t slot = 0; slot < launcher_carousel_layout::kPanelCount; ++slot)
         set_panel_icon(panel(slot), {});
+    for (lv_obj_t *card : list_cards_)
+        set_panel_icon(card, {});
     set_page_slider_range(icon_paths.size(), launch_ ? launch_->current_app_index() : 0);
     refresh_carousel();
 }

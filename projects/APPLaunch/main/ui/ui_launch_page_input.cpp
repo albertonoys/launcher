@@ -9,7 +9,10 @@
 #include "hal_lvgl_bsp.h"
 #include "input_keys.h"
 #include "keyboard_input.h"
+#include "model/screensaver_model.hpp"
 #include "sample_log.h"
+
+#include <cctype>
 
 #undef SLOGI
 #define SLOGI(...) do { } while (0)
@@ -83,6 +86,11 @@ void UILaunchPage::handle_home_key(lv_event_t *event)
            kbd_state_name(elm->key_state),
            elm->sym_name);
 
+    if (list_mode_ && list_container_) {
+        handle_list_key(elm, code);
+        return;
+    }
+
     if (elm->key_state)
     {
         switch (code)
@@ -122,6 +130,118 @@ void UILaunchPage::handle_home_key(lv_event_t *event)
         audio_play_enter();
         launch_selected_app();
     }
+}
+
+constexpr uint32_t kListEnterHoldMs = 500;
+
+void UILaunchPage::stop_list_enter_hold()
+{
+    if (list_enter_timer_) lv_timer_delete(list_enter_timer_);
+    list_enter_timer_ = nullptr;
+}
+
+void UILaunchPage::list_enter_hold_cb(lv_timer_t *timer) noexcept
+{
+    auto *self = static_cast<UILaunchPage *>(lv_timer_get_user_data(timer));
+    if (!self) return;
+    try {
+        self->stop_list_enter_hold();
+        self->list_enter_swallow_ = true;
+        audio_play_switch();
+        self->open_list_menu();
+    } catch (...) {
+    }
+}
+
+// Keys are owned by the Tab menu while it is open: nothing reaches the list or launches an app.
+// Closing happens on press (Esc/Tab), picking on Enter release, so the matching release does nothing.
+void UILaunchPage::handle_list_menu_key(const struct key_item *elm, uint32_t code)
+{
+    if (!elm->key_state) {
+        if (code == KEY_ENTER && list_menu_sel_ < list_menu_items_.size()) {
+            audio_play_enter();
+            activate_list_menu(list_menu_items_[list_menu_sel_]);
+        }
+        return;
+    }
+    const size_t count = list_menu_items_.size();
+    if (delete_running_ && code == KEY_TAB) return;  // only Esc hides the "Deleting" box
+    if (code == KEY_ESC || code == KEY_TAB) {
+        audio_play_switch();
+        close_list_menu();
+    } else if ((code == KEY_UP || code == KEY_DOWN) && count > 1) {
+        list_menu_sel_ = (list_menu_sel_ + (code == KEY_DOWN ? 1 : count - 1)) % count;
+        audio_play_switch();
+        update_list_menu();
+    }
+}
+
+void UILaunchPage::handle_list_key(const struct key_item *elm, uint32_t code)
+{
+    if (code == KEY_ENTER && !elm->key_state && list_enter_swallow_) {
+        list_enter_swallow_ = false;
+        return;
+    }
+    if (list_menu_) {
+        list_tab_armed_ = false;
+        handle_list_menu_key(elm, code);
+        return;
+    }
+    if (code == KEY_TAB) {
+        // A short Tab press (released before the lock-hold hint appears) opens the menu;
+        // a longer hold is the screensaver gesture, which this page must not also act on.
+        if (elm->key_state == KBD_KEY_PRESSED) {
+            list_tab_armed_ = true;
+            list_tab_down_tick_ = lv_tick_get();
+        } else if (!elm->key_state) {
+            const bool short_press =
+                list_tab_armed_ && lv_tick_elaps(list_tab_down_tick_) < ScreensaverModel::hold_hint_ms();
+            list_tab_armed_ = false;
+            if (short_press) {
+                audio_play_switch();
+                open_sort_menu();
+            }
+        }
+        return;
+    }
+    if (elm->key_state) list_tab_armed_ = false;  // Tab chorded with another key
+    if (code == KEY_ENTER) {
+        // A tap launches on release; holding it opens the Tab menu (list_enter_hold_cb).
+        if (elm->key_state == KBD_KEY_PRESSED) {
+            stop_list_enter_hold();
+            list_enter_swallow_ = false;
+            list_enter_timer_ = lv_timer_create(list_enter_hold_cb, kListEnterHoldMs, this);
+        } else if (!elm->key_state) {
+            stop_list_enter_hold();
+            audio_play_enter();
+            launch_selected_app();
+        }
+        return;
+    }
+    if (elm->key_state) stop_list_enter_hold();  // another key while Enter is down: no menu
+    if (!elm->key_state) return;
+
+    bool changed = false;
+    switch (code) {
+    case KEY_UP:    changed = list_move(-1, true); break;
+    case KEY_DOWN:  changed = list_move(1, true); break;
+    case KEY_LEFT:  changed = list_move(-static_cast<int>(kListRows), false); break;
+    case KEY_RIGHT: changed = list_move(static_cast<int>(kListRows), false); break;
+    default: {
+        // F/X/Z/C are arrows; fn/ctrl/alt/logo combinations are shortcuts, not text.
+        const uint32_t blocked = KBD_MOD_CTRL | KBD_MOD_ALT | KBD_MOD_LOGO | KBD_MOD_FN;
+        if (elm->key_state != KBD_KEY_PRESSED || (elm->mods & blocked) ||
+            fzxc_to_arrow(elm->key_code) != elm->key_code)
+            return;
+        const uint32_t c = elm->codepoint;
+        if (c == ' ' || elm->key_code == KEY_SPACE)
+            changed = list_cycle_favorite();
+        else if (c < 0x80 && std::isalnum(static_cast<int>(c)))
+            changed = list_jump(static_cast<char>(c));
+        break;
+    }
+    }
+    if (changed) audio_play_switch();
 }
 
 void UILaunchPage::on_left_arrow_clicked(lv_event_t *event) noexcept
