@@ -11,6 +11,7 @@
 #include "model/launcher_navigation_model.hpp"
 #include "model/launcher_startup_contract.hpp"
 #include <atomic>
+#include <climits>
 #include <array>
 #include <memory>
 #include <string>
@@ -70,13 +71,9 @@ private:
     {
         std::atomic<bool> alive{true};
         std::atomic<bool> pending{false};
-    };
-
-    struct StartupSoundResultContext
-    {
-        UILaunchPage *page = nullptr;
-        std::weak_ptr<StartupSoundAsyncState> state;
-        int code = -1;
+        // Written by the audio worker thread, read by startup_sound_timer_cb on the LVGL thread.
+        std::atomic<int> result{kNoResult};
+        static constexpr int kNoResult = INT_MIN;
     };
 
     void create_app_container(lv_obj_t *parent);
@@ -111,7 +108,6 @@ private:
     static void on_owned_obj_deleted(lv_event_t *event) noexcept;
     static void on_root_deleted(lv_event_t *event) noexcept;
     static void startup_sound_timer_cb(lv_timer_t *timer) noexcept;
-    static void startup_sound_result_async(void *user_data) noexcept;
     static void startup_delay_timer_cb(lv_timer_t *timer) noexcept;
 
     Launch *launch_ = nullptr;

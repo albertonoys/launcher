@@ -128,19 +128,12 @@ void UILaunchPage::play_startup_sound_with_retry()
 
     std::weak_ptr<StartupSoundAsyncState> weak_state = state;
     try {
-        cp0_signal_audio_api({"SystemSoundPlay", "0"}, [page = this, weak_state](int code, std::string) {
+        // The reply arrives on the sound player's thread. LVGL is not thread-safe (lv_async_call
+        // from there corrupted the timer list and crashed the launcher), so only store the code;
+        // startup_sound_timer_cb picks it up on the LVGL thread.
+        cp0_signal_audio_api({"SystemSoundPlay", "0"}, [weak_state](int code, std::string) {
             auto state = weak_state.lock();
-            if (!state || !state->alive.load()) return;
-            auto *context = new (std::nothrow) StartupSoundResultContext{
-                page, weak_state, code};
-            if (!context) {
-                state->pending.store(false);
-                return;
-            }
-            if (lv_async_call(startup_sound_result_async, context) != LV_RESULT_OK) {
-                state->pending.store(false);
-                delete context;
-            }
+            if (state && state->alive.load()) state->result.store(code);
         });
     } catch (...) {
         handle_startup_sound_result(-1);
@@ -154,19 +147,6 @@ void UILaunchPage::handle_startup_sound_result(int code)
         stop_startup_sound_timer();
         startup_sound_retry_count_ = 0;
         return;
-    }
-}
-
-void UILaunchPage::startup_sound_result_async(void *user_data) noexcept
-{
-    std::unique_ptr<StartupSoundResultContext> context(
-        static_cast<StartupSoundResultContext *>(user_data));
-    if (!context) return;
-    try {
-        auto state = context->state.lock();
-        if (state && state->alive.load() && context->page)
-            context->page->handle_startup_sound_result(context->code);
-    } catch (...) {
     }
 }
 
@@ -259,6 +239,11 @@ void UILaunchPage::startup_sound_timer_cb(lv_timer_t *timer) noexcept
             !launcher_startup_timer_is_current(timer, self->startup_sound_timer_))
             return;
 
+        const int code = self->startup_sound_state_->result.exchange(StartupSoundAsyncState::kNoResult);
+        if (code != StartupSoundAsyncState::kNoResult) {
+            self->handle_startup_sound_result(code);
+            if (!self->startup_sound_timer_) return;  // played: the timer was just deleted
+        }
         if (self->startup_sound_state_->pending.load()) return;
 
         ++self->startup_sound_retry_count_;
