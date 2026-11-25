@@ -73,7 +73,7 @@ bool LauncherToast::ensure_created() noexcept
     }
 }
 
-void LauncherToast::show(const char *text) noexcept
+void LauncherToast::show(const char *text, bool bottom) noexcept
 {
     try {
     if (!ensure_created())
@@ -82,7 +82,8 @@ void LauncherToast::show(const char *text) noexcept
     lv_label_set_text(label_, text ? text : "");
     lv_obj_set_height(container_, text && std::strchr(text, '\n') ? kMultilineHeight : kHeight);
     lv_obj_center(label_);
-    lv_obj_align(container_, LV_ALIGN_TOP_MID, 0, kTopOffset);
+    lv_obj_align(container_, bottom ? LV_ALIGN_BOTTOM_MID : LV_ALIGN_TOP_MID, 0,
+                 bottom ? -kTopOffset : kTopOffset);
     lv_obj_move_foreground(container_);
     lv_obj_clear_flag(container_, LV_OBJ_FLAG_HIDDEN);
     if (!hide_timer_)
