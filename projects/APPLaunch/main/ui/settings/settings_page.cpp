@@ -6,6 +6,7 @@
 
 #include "settings_page.hpp"
 
+#include "../launcher_ui_font.hpp"
 #include "cp0_lvgl_app.h"
 #include "hal_lvgl_bsp.h"
 #include "settings_adb_guide_page.hpp"
@@ -28,6 +29,7 @@
 #include "settings_wifi_page.hpp"
 #include "settings_tree_types.hpp"
 #include "settings_extport.hpp"
+#include "../model/lockscreen_state_model.hpp"
 #include "../model/setup_value_policy.hpp"
 
 #include <atomic>
@@ -414,7 +416,7 @@ bool write_bluetooth_named_only_config(int value)
     return succeeded;
 }
 
-bool save_bluetooth_config()
+bool save_config()
 {
     bool succeeded = false;
     try {
@@ -566,7 +568,7 @@ void bluetooth_named_only_api(int cmd, void *data)
         bluetooth_named_only_state = previous;
         return;
     }
-    if (save_bluetooth_config()) {
+    if (save_config()) {
         bluetooth_named_only_state = desired;
         return;
     }
@@ -574,8 +576,61 @@ void bluetooth_named_only_api(int cmd, void *data)
     // SetInt mutates the live config immediately. Restore it when Save fails
     // so a later page rebuild cannot observe an unpersisted value.
     if (write_bluetooth_named_only_config(previous ? 1 : 0))
-        (void)save_bluetooth_config();
+        (void)save_config();
     bluetooth_named_only_state = previous;
+}
+
+/* On: waking from the black screen needs TAB then ENTER.  Off: any key wakes. */
+void screen_lock_api(int cmd, void *data)
+{
+    bool enabled = true;
+    try {
+        cp0_signal_config_api({"GetInt", kLockScreenConfigKey, "1"},
+                              [&](int code, std::string value) { enabled = !(code == 0 && value == "0"); });
+    } catch (...) {
+    }
+    if ((cmd == SettingApiReadFlag || cmd == SettingApiReadFlagTimeStart) && data) {
+        if (cmd == SettingApiReadFlag)
+            *static_cast<bool *>(data) = enabled;
+        else
+            std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = enabled;
+        return;
+    }
+    if (cmd != SettingApiActivate) return;
+
+    auto write = [](bool value) {
+        bool succeeded = false;
+        try {
+            cp0_signal_config_api({"SetInt", kLockScreenConfigKey, value ? "1" : "0"},
+                                  [&](int code, std::string) { succeeded = code == 0; });
+        } catch (...) {
+        }
+        return succeeded;
+    };
+    if (!write(!enabled)) return;
+    // SetInt changes the live config at once; put it back when Save fails.
+    if (!save_config()) (void)write(enabled);
+}
+
+/* Settings -> Screen -> Font: one switch per family, the saved one shows on. */
+SettingApiCallBackFunc ui_font_api(std::string family)
+{
+    return [family](int cmd, void *data) {
+        const bool on = launcher_ui_font::family() == family;
+        if (cmd == SettingApiReadFlag && data) *static_cast<bool *>(data) = on;
+        else if (cmd == SettingApiReadFlagTimeStart && data)
+            std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = on;
+        else if (cmd == SettingApiActivate) (void)launcher_ui_font::set_family(family);
+    };
+}
+
+void ui_font_sharp_api(int cmd, void *data)
+{
+    const bool on = launcher_ui_font::sharp();
+    if (cmd == SettingApiReadFlag && data) *static_cast<bool *>(data) = on;
+    else if (cmd == SettingApiReadFlagTimeStart && data)
+        std::get<0>(*static_cast<SettingApiReadFlagTimeStartData *>(data)) = on;
+    else if (cmd == SettingApiActivate) (void)launcher_ui_font::set_sharp(!on);
 }
 
 static void append_numeric_options(Tree &tree, const NodeIter &parent, int first, int last)
@@ -621,6 +676,19 @@ void UISettingTreePage::create_page_detail()
             mode_tree.append_child(dark_time, SettingEntry{"60S"});
             mode_tree.append_child(dark_time, SettingEntry{"300S"});
         }
+        mode_tree.append_child(screen, SettingEntry{"Lock", screen_lock_api, true});
+        {
+            NodeIter font = mode_tree.append_child(screen, SettingEntry{"Font", roller_page_factory});
+            for (const auto &[label, family] : {std::pair<const char *, const char *>{"Default", ""},
+                                                {"DejaVu Sans", "dejavu"}, {"Terminus", "terminus"},
+                                                {"Tamzen", "tamzen"}, {"Spleen", "spleen"},
+                                                {"Greybeard", "greybeard"}, {"Ark Pixel", "ark"},
+                                                {"Cozette", "cozette"}, {"ProggyClean", "proggy"},
+                                                {"Departure Mono", "departure"},
+                                                {"Scientifica", "scientifica"}})
+                mode_tree.append_child(font, SettingEntry{label, ui_font_api(family), true});
+        }
+        mode_tree.append_child(screen, SettingEntry{"Sharp text", SettingApiCallBackFunc(ui_font_sharp_api), true});
     }
 
     {

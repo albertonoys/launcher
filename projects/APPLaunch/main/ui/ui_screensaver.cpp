@@ -461,6 +461,20 @@ int timeout_seconds() noexcept
     }
 }
 
+/* Settings -> Screen -> Lock: 0 lets any key wake straight to the working screen. */
+bool unlock_gesture_enabled() noexcept
+{
+    int value = 1;
+    try {
+        cp0_signal_config_api({"GetInt", kLockScreenConfigKey, "1"},
+                              [&](int code, std::string data) {
+                                  if (code == 0 && data == "0") value = 0;
+                              });
+    } catch (...) {
+    }
+    return value != 0;
+}
+
 void create_objects()
 {
     lv_display_t *display = lv_display_get_default();
@@ -565,6 +579,7 @@ void enter_lockscreen()
     const uint32_t now = lv_tick_get();
     s_model.activate();
     s_lock.reset(now);
+    s_lock.set_unlock_gesture(unlock_gesture_enabled());
     launcher_battery_ui::refresh_visibility();
 
     suspend_system_sound();

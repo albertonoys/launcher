@@ -24,6 +24,10 @@
  * state either, which is what keeps the key that entered the lock (a held TAB)
  * from walking the machine forward on its own release.
  */
+/* Settings -> Screen -> Lock (int, default 1).  0 skips the unlock gesture: the
+ * first fresh press on the black screen unlocks. */
+constexpr const char *kLockScreenConfigKey = "lock_screen";
+
 enum class LockscreenState {
     Locked,
     PendingUnlock,
@@ -58,6 +62,8 @@ public:
 
     LockscreenState state() const { return state_; }
     bool visible() const { return state_ != LockscreenState::Locked; }
+    /* Off: the first fresh press from black unlocks, skipping the TAB/ENTER gesture. */
+    void set_unlock_gesture(bool required) { unlock_gesture_ = required; }
 
     void reset(uint32_t now)
     {
@@ -75,6 +81,10 @@ public:
 
         switch (state_) {
         case LockscreenState::Locked:
+            if (!unlock_gesture_) {
+                decision.unlock = true;
+                break;
+            }
             state_ = LockscreenState::PendingUnlock;
             decision.show_panel = true;
             break;
@@ -121,4 +131,5 @@ public:
 private:
     uint32_t last_activity_tick_ = 0;
     LockscreenState state_ = LockscreenState::Locked;
+    bool unlock_gesture_ = true;
 };

@@ -57,6 +57,9 @@ assert "start_screen_off" not in SOURCE
 # panel sleeps or unlocks.
 assert "s_lock.handle_key(item->key_code, pressed, released, now)" in SOURCE
 assert "s_lock.poll(now)" in SOURCE
+# Screen -> Lock off skips the gesture; read on every lock entry from one shared key.
+assert 'kLockScreenConfigKey = "lock_screen"' in LOCK
+assert "s_lock.set_unlock_gesture(unlock_gesture_enabled())" in SOURCE
 assert "decision.unlock" in SOURCE
 assert "show_lockscreen_panel()" in SOURCE
 assert "sleep_lockscreen()" in SOURCE

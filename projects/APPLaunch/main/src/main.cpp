@@ -7,6 +7,7 @@
 #include "cp0_lvgl_app_runner.hpp"
 #include "sample_log.h"
 #include "ui/launcher_media_controls.h"
+#include "ui/launcher_ui_font.hpp"
 #include "ui/ui.h"
 #include "ui/ui_screensaver.h"
 
@@ -42,6 +43,8 @@ int main(void)
         ui_screensaver_init();
         return true;
     };
+    // A font change exits; systemd's Restart=always brings the launcher back with it.
+    options.should_quit = []() { return launcher_ui_font::restart_requested(); };
     options.teardown = []() { launcher_ui::deinit(); };
     return cp0_lvgl_run(std::move(options));
 }

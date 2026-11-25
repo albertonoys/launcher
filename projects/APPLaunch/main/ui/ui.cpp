@@ -11,6 +11,7 @@
 
 #include "ui.h"
 #include "launcher_media_controls.h"
+#include "launcher_ui_font.hpp"
 #include "launcher_ui_app_page.hpp"
 #include "ui_low_battery.h"
 #include "ui_global_hint.h"
@@ -38,6 +39,7 @@ void init()
 {
     if (home)
         return;
+    launcher_ui_font::apply();
     /* Cache the system volume once here so the shortcut OSD and
      * Settings -> Speaker share one value for the whole launcher session. */
     launcher_media_controls::start_volume_cache();

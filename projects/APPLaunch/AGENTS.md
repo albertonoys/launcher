@@ -217,6 +217,12 @@ rollback on write/save failure. Never/10S/30S/60S/300S map to 0/10/30/60/300
 seconds. The default is 30 seconds; 0 disables automatic locking only.
 The lock-screen runtime reads this setting during its idle checks.
 
+Screen -> Lock is a toggle stored as `lock_screen` (`kLockScreenConfigKey`,
+default 1), saved with the same rollback. The runtime reads it on every lock
+entry. With 0 the screen still goes black (timeout, TAB hold), but the first
+fresh press on the black screen unlocks instead of waking to the TAB/ENTER
+gesture; repeats and releases still do nothing.
+
 While unlocked, the filter observes TAB without consuming its press/release,
 so the page retains the short-tap behavior. After 500 ms it shows the persistent
 `Hold TAB for 3s to lock` toast; at 3000 ms it enters the lock. Release, another
